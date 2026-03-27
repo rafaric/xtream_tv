@@ -63,11 +63,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   // Buffering timeout y auto-retry
   Timer? _bufferingTimeoutTimer;
+  Timer? _playbackWatchdogTimer;
   int _retryCount = 0;
-  static const int _maxRetries = 1;
+  static const int _maxRetries = 2;
   static const Duration _bufferingTimeout = Duration(seconds: 15);
+  static const Duration _playbackWatchdogInterval = Duration(seconds: 10);
 
   StreamSubscription<bool>? _bufferingSubscription;
+  StreamSubscription<bool>? _playingSubscription;
+  StreamSubscription<bool>? _completedSubscription;
 
   @override
   void initState() {
@@ -122,6 +126,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _setupPlayerListeners() {
     _bufferingSubscription?.cancel();
     _errorSubscription?.cancel();
+    _playingSubscription?.cancel();
+    _completedSubscription?.cancel();
 
     _bufferingSubscription = _player.stream.buffering.listen((buffering) {
       if (mounted && !_isDisposed) {
@@ -130,29 +136,67 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         if (buffering) {
           // Iniciar timeout cuando empieza a bufferear
           _startBufferingTimeout();
+          _stopPlaybackWatchdog();
         } else {
-          // Cancelar timeout y resetear retry cuando reproduce bien
+          // Cancelar timeout cuando deja de bufferear
           _cancelBufferingTimeout();
-          _retryCount = 0;
+          // Iniciar watchdog para detectar stream muerto
+          _startPlaybackWatchdog();
         }
+      }
+    });
+
+    // Escuchar estado de reproducción
+    _playingSubscription = _player.stream.playing.listen((playing) {
+      if (mounted && !_isDisposed) {
+        debugPrint('▶️ Playing: $playing');
+        if (playing) {
+          // Resetear retry cuando reproduce exitosamente
+          _retryCount = 0;
+          _startPlaybackWatchdog();
+        }
+      }
+    });
+
+    // Escuchar cuando el stream termina (puede indicar corte)
+    _completedSubscription = _player.stream.completed.listen((completed) {
+      if (mounted && !_isDisposed && completed) {
+        debugPrint('⏹️ Stream completed unexpectedly');
+        // Un stream live no debería "completar" - esto indica un corte
+        _handleStreamError();
       }
     });
 
     // Escuchar errores del stream
     _errorSubscription = _player.stream.error.listen((error) {
       debugPrint('🔴 Player error: $error');
-      if (mounted && !_isDisposed) {
-        // Detectar errores de stream no disponible
-        if (error.contains('CHUNK_DEMUXER_ERROR') ||
-            error.contains('PIPELINE_ERROR') ||
-            error.contains('MEDIA_ERR') ||
-            error.contains('parsing failed') ||
-            error.contains('404') ||
-            error.contains('network')) {
+      if (mounted && !_isDisposed && error.isNotEmpty) {
+        _handleStreamError();
+      }
+    });
+  }
+
+  void _startPlaybackWatchdog() {
+    _stopPlaybackWatchdog();
+    _playbackWatchdogTimer = Timer.periodic(_playbackWatchdogInterval, (_) {
+      if (mounted && !_isDisposed && !_isBuffering) {
+        final position = _player.state.position;
+        final playing = _player.state.playing;
+
+        // Si no está buffering, no está reproduciendo, y tiene error o posición 0
+        if (!playing && position == Duration.zero && _streamError == null) {
+          debugPrint(
+            '🔍 Watchdog: Stream appears dead (not playing, position=0)',
+          );
           _handleStreamError();
         }
       }
     });
+  }
+
+  void _stopPlaybackWatchdog() {
+    _playbackWatchdogTimer?.cancel();
+    _playbackWatchdogTimer = null;
   }
 
   void _startBufferingTimeout() {
@@ -192,10 +236,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   Future<void> _retryCurrentChannel() async {
     debugPrint('🔄 Retrying channel: ${_currentChannel.name}');
+    _stopPlaybackWatchdog();
 
     if (kIsWeb) {
       // En Web: recrear player
       _bufferingSubscription?.cancel();
+      _playingSubscription?.cancel();
+      _completedSubscription?.cancel();
       _errorSubscription?.cancel();
       await _player.dispose();
 
@@ -255,7 +302,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       debugPrint('🌐 Web: recreating VideoController...');
 
       // Limpiar subscriptions antes de recrear
+      _stopPlaybackWatchdog();
       _bufferingSubscription?.cancel();
+      _playingSubscription?.cancel();
+      _completedSubscription?.cancel();
       _errorSubscription?.cancel();
 
       // Disponer el player anterior
@@ -288,7 +338,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _goBack() {
     if (_isDisposed) return;
     _isDisposed = true;
+    _stopPlaybackWatchdog();
     _bufferingSubscription?.cancel();
+    _playingSubscription?.cancel();
+    _completedSubscription?.cancel();
+    _errorSubscription?.cancel();
     if (_ownsPlayer) _player.dispose();
     Navigator.of(context).pop();
   }
@@ -1320,7 +1374,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     HardwareKeyboard.instance.removeHandler(_onKey);
     _longPressTimer?.cancel();
     _bufferingTimeoutTimer?.cancel();
+    _playbackWatchdogTimer?.cancel();
     _bufferingSubscription?.cancel();
+    _playingSubscription?.cancel();
+    _completedSubscription?.cancel();
     _errorSubscription?.cancel();
     if (_ownsPlayer && !_isDisposed) {
       _player.dispose();
