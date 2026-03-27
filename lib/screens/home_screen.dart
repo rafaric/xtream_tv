@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../providers/xtream_provider.dart';
 import '../models/channel.dart';
+import '../services/category_settings_service.dart';
 import 'login_screen.dart';
 import 'player_screen.dart';
 import 'vod_detail_screen.dart';
@@ -22,7 +23,9 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  int _selectedCategoryIndex = 0;
+  int _selectedNavIndex =
+      1; // Índice en barra de navegación (0=nav), default Live TV
+  int _selectedCategoryIndex = 0; // Índice en lista de categorías
   int _selectedContentIndex = 0;
   int _focusColumn = 1; // 0=nav, 1=categorías, 2=contenido
   XtreamChannel? _previewChannel;
@@ -112,11 +115,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           // Items de navegación
           Expanded(
             child: Column(
-              children: _navItems.map((item) {
+              children: _navItems.asMap().entries.map((entry) {
+                final index = entry.key;
+                final item = entry.value;
                 final isSelected = currentSection == item['section'];
                 final isFocused =
-                    _focusColumn == 0 &&
-                    _navItems.indexOf(item) == _selectedCategoryIndex;
+                    _focusColumn == 0 && index == _selectedNavIndex;
                 return _buildNavItem(
                   icon: item['icon'] as IconData,
                   label: item['label'] as String,
@@ -126,6 +130,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ref.read(mainSectionProvider.notifier).state =
                         item['section'] as MainSection;
                     setState(() {
+                      _selectedNavIndex = index;
                       _selectedCategoryIndex = 0;
                       _selectedContentIndex = 0;
                       _focusColumn = 1;
@@ -227,9 +232,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildCategoriesList(List<XtreamCategory> categories) {
+    final hiddenIds = ref.watch(hiddenCategoryIdsProvider);
+    final settings = ref.watch(categorySettingsProvider);
+
     final allCategories = [
       XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
-      ...categories,
+      ...categories.where((c) => !hiddenIds.contains(c.categoryId)),
     ];
 
     return Column(
@@ -252,10 +260,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             controller: _categoryScrollController,
             itemCount: allCategories.length,
             itemBuilder: (context, index) {
+              final category = allCategories[index];
               final isSelected = index == _selectedCategoryIndex;
               final isFocused = _focusColumn == 1 && isSelected;
+              final catSettings = settings[category.categoryId];
+              final displayName =
+                  catSettings?.customName ?? category.categoryName;
               return _buildCategoryItem(
-                allCategories[index],
+                category,
+                displayName,
                 isSelected,
                 isFocused,
                 index,
@@ -269,6 +282,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildCategoryItem(
     XtreamCategory category,
+    String displayName,
     bool isSelected,
     bool isFocused,
     int index,
@@ -279,6 +293,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _selectedContentIndex = 0;
         _focusColumn = 2;
       }),
+      onLongPress: category.categoryId != '__all__'
+          ? () => _showCategoryContextMenu(category, displayName)
+          : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
@@ -295,7 +312,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
         child: Text(
-          category.categoryName,
+          displayName,
           style: TextStyle(
             color: isSelected ? Colors.white : Colors.white60,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
@@ -403,11 +420,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       error: (e, _) => _buildErrorWidget(e.toString()),
       data: (categories) {
+        final hiddenIds = ref.watch(hiddenCategoryIdsProvider);
         final allCategories = [
           XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
-          ...categories,
+          ...categories.where((c) => !hiddenIds.contains(c.categoryId)),
         ];
         if (_selectedCategoryIndex >= allCategories.length) {
+          // Ajustar índice si quedó fuera de rango
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _selectedCategoryIndex = allCategories.length - 1;
+              });
+            }
+          });
           return const SizedBox();
         }
         final selected = allCategories[_selectedCategoryIndex];
@@ -460,15 +486,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildLiveGrid(List<XtreamChannel> channels) {
     final hiddenIds = ref.watch(hiddenChannelIdsProvider);
-    final filteredChannels = channels
+    final categoryId = _getSelectedCategoryId() ?? '__all__';
+    final settings = ref.watch(categorySettingsProvider);
+    final catSettings = settings[categoryId] ?? const CategorySettings();
+    final favoriteIds = ref.watch(favoriteIdsProvider);
+
+    // Filtrar canales ocultos
+    var filteredChannels = channels
         .where((c) => !hiddenIds.contains(c.streamId))
         .toList();
 
+    // Filtrar solo favoritos si está activo
+    if (catSettings.showFavoritesOnly) {
+      final favIds = favoriteIds.maybeWhen(
+        data: (ids) => ids,
+        orElse: () => <int>{},
+      );
+      filteredChannels = filteredChannels
+          .where((c) => favIds.contains(c.streamId))
+          .toList();
+    }
+
+    // Aplicar ordenamiento
+    switch (catSettings.sortOrder) {
+      case ChannelSortOrder.nameAsc:
+        filteredChannels.sort((a, b) => a.name.compareTo(b.name));
+        break;
+      case ChannelSortOrder.nameDesc:
+        filteredChannels.sort((a, b) => b.name.compareTo(a.name));
+        break;
+      case ChannelSortOrder.playlist:
+        // Mantener orden original
+        break;
+    }
+
     if (filteredChannels.isEmpty) {
-      return _buildEmptyWidget('No hay canales en esta categoría');
+      return _buildEmptyWidget(
+        catSettings.showFavoritesOnly
+            ? 'No hay favoritos en esta categoría'
+            : 'No hay canales en esta categoría',
+      );
     }
     final epgMapAsync = ref.watch(epgMapProvider);
-    final favoriteIds = ref.watch(favoriteIdsProvider);
 
     return epgMapAsync.when(
       loading: () => _buildChannelList(filteredChannels, {}, favoriteIds),
@@ -1037,16 +1096,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         event.logicalKey == LogicalKeyboardKey.enter;
 
     // ─────────────────────────────────────────────────────────────
-    // LONG PRESS DETECTION para context menu (solo en columna de contenido)
+    // LONG PRESS DETECTION para context menu (columnas 1 y 2)
     // ─────────────────────────────────────────────────────────────
-    if (isSelectKey && _focusColumn == 2) {
+    if (isSelectKey && (_focusColumn == 1 || _focusColumn == 2)) {
       if (event is KeyDownEvent) {
         _isLongPress = false;
         _longPressTimer?.cancel();
         _longPressTimer = Timer(const Duration(milliseconds: 500), () {
           if (mounted) {
             _isLongPress = true;
-            _handleLongPress();
+            if (_focusColumn == 1) {
+              _handleCategoryLongPress();
+            } else {
+              _handleLongPress();
+            }
           }
         });
         return;
@@ -1106,12 +1169,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  void _handleCategoryLongPress() {
+    final section = ref.read(mainSectionProvider);
+
+    // Solo para secciones con categorías (Live, VOD, Series)
+    if (section != MainSection.live &&
+        section != MainSection.vod &&
+        section != MainSection.series) {
+      return;
+    }
+
+    // Obtener la lista de categorías según la sección
+    AsyncValue<List<XtreamCategory>> categoriesAsync;
+    switch (section) {
+      case MainSection.live:
+        categoriesAsync = ref.read(categoriesProvider);
+        break;
+      case MainSection.vod:
+        categoriesAsync = ref.read(vodCategoriesProvider);
+        break;
+      case MainSection.series:
+        categoriesAsync = ref.read(seriesCategoriesProvider);
+        break;
+      default:
+        return;
+    }
+
+    final categories = categoriesAsync.maybeWhen(
+      data: (cats) => cats,
+      orElse: () => <XtreamCategory>[],
+    );
+
+    final hiddenIds = ref.read(hiddenCategoryIdsProvider);
+    final settings = ref.read(categorySettingsProvider);
+
+    final allCategories = [
+      XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
+      ...categories.where((c) => !hiddenIds.contains(c.categoryId)),
+    ];
+
+    if (_selectedCategoryIndex < allCategories.length) {
+      final category = allCategories[_selectedCategoryIndex];
+
+      // No mostrar menu para "Todos"
+      if (category.categoryId == '__all__') return;
+
+      final catSettings = settings[category.categoryId];
+      final displayName = catSettings?.customName ?? category.categoryName;
+      _showCategoryContextMenu(category, displayName);
+    }
+  }
+
   void _navigateUp() {
     setState(() {
-      if (_focusColumn == 0 || _focusColumn == 1) {
+      if (_focusColumn == 0) {
+        // Navegación principal (secciones)
+        if (_selectedNavIndex > 0) _selectedNavIndex--;
+      } else if (_focusColumn == 1) {
+        // Categorías
         if (_selectedCategoryIndex > 0) _selectedCategoryIndex--;
         _scrollCategoryToSelected();
       } else {
+        // Contenido
         if (_selectedContentIndex > 0) _selectedContentIndex--;
         _scrollContentToSelected();
       }
@@ -1120,10 +1239,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _navigateDown() {
     setState(() {
-      if (_focusColumn == 0 || _focusColumn == 1) {
+      if (_focusColumn == 0) {
+        // Navegación principal (secciones)
+        if (_selectedNavIndex < _navItems.length - 1) _selectedNavIndex++;
+      } else if (_focusColumn == 1) {
+        // Categorías
         _selectedCategoryIndex++;
         _scrollCategoryToSelected();
       } else {
+        // Contenido
         _selectedContentIndex++;
         _scrollContentToSelected();
       }
@@ -1132,9 +1256,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _handleSelect() {
     if (_focusColumn == 0) {
-      final section =
-          _navItems[_selectedCategoryIndex % _navItems.length]['section']
-              as MainSection;
+      final section = _navItems[_selectedNavIndex]['section'] as MainSection;
       ref.read(mainSectionProvider.notifier).state = section;
       setState(() {
         _selectedCategoryIndex = 0;
@@ -1197,6 +1319,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   String? _getSelectedCategoryId() {
     final section = ref.read(mainSectionProvider);
+    final hiddenIds = ref.read(hiddenCategoryIdsProvider);
     AsyncValue<List<XtreamCategory>> categoriesAsync;
     switch (section) {
       case MainSection.vod:
@@ -1214,7 +1337,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
     final allCategories = [
       XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
-      ...categories,
+      ...categories.where((c) => !hiddenIds.contains(c.categoryId)),
     ];
     if (_selectedCategoryIndex >= allCategories.length) return null;
     final selected = allCategories[_selectedCategoryIndex];
@@ -1796,6 +1919,46 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ).then((_) => _isDialogOpen = false);
   }
 
+  void _showCategoryContextMenu(XtreamCategory category, String displayName) {
+    _isDialogOpen = true;
+    final settings = ref
+        .read(categorySettingsProvider.notifier)
+        .getSettings(category.categoryId);
+    showDialog(
+      context: context,
+      builder: (context) => _CategoryContextMenuDialog(
+        category: category,
+        displayName: displayName,
+        settings: settings,
+        onRename: (newName) {
+          ref
+              .read(categorySettingsProvider.notifier)
+              .setCustomName(category.categoryId, newName);
+        },
+        onRestoreName: () {
+          ref
+              .read(categorySettingsProvider.notifier)
+              .setCustomName(category.categoryId, null);
+        },
+        onSortOrderChanged: (order) {
+          ref
+              .read(categorySettingsProvider.notifier)
+              .setSortOrder(category.categoryId, order);
+        },
+        onShowFavoritesOnlyChanged: (value) {
+          ref
+              .read(categorySettingsProvider.notifier)
+              .setShowFavoritesOnly(category.categoryId, value);
+        },
+        onHide: () {
+          ref
+              .read(hiddenCategoryIdsProvider.notifier)
+              .hide(category.categoryId);
+        },
+      ),
+    ).then((_) => _isDialogOpen = false);
+  }
+
   Future<void> _goToLogin() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('xtream_url');
@@ -2180,6 +2343,388 @@ class _ChannelInfoDialog extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Category context menu dialog (D-pad compatible)
+class _CategoryContextMenuDialog extends StatefulWidget {
+  final XtreamCategory category;
+  final String displayName;
+  final CategorySettings settings;
+  final Function(String) onRename;
+  final VoidCallback onRestoreName;
+  final Function(ChannelSortOrder) onSortOrderChanged;
+  final Function(bool) onShowFavoritesOnlyChanged;
+  final VoidCallback onHide;
+
+  const _CategoryContextMenuDialog({
+    required this.category,
+    required this.displayName,
+    required this.settings,
+    required this.onRename,
+    required this.onRestoreName,
+    required this.onSortOrderChanged,
+    required this.onShowFavoritesOnlyChanged,
+    required this.onHide,
+  });
+
+  @override
+  State<_CategoryContextMenuDialog> createState() =>
+      _CategoryContextMenuDialogState();
+}
+
+class _CategoryContextMenuDialogState
+    extends State<_CategoryContextMenuDialog> {
+  int _selectedIndex = 0;
+  late ChannelSortOrder _sortOrder;
+  late bool _showFavoritesOnly;
+
+  final List<String> _menuLabels = [
+    'Nombre del grupo',
+    'Restaurar nombre',
+    'Ordenar canales',
+    'Solo favoritos',
+    'Ocultar grupo',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _sortOrder = widget.settings.sortOrder;
+    _showFavoritesOnly = widget.settings.showFavoritesOnly;
+  }
+
+  String _getSortOrderLabel() {
+    switch (_sortOrder) {
+      case ChannelSortOrder.playlist:
+        return 'Por playlist';
+      case ChannelSortOrder.nameAsc:
+        return 'A-Z';
+      case ChannelSortOrder.nameDesc:
+        return 'Z-A';
+    }
+  }
+
+  void _handleKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        _selectedIndex = (_selectedIndex - 1).clamp(0, _menuLabels.length - 1);
+      });
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      setState(() {
+        _selectedIndex = (_selectedIndex + 1).clamp(0, _menuLabels.length - 1);
+      });
+    } else if (event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter) {
+      _handleSelect();
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+        event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _handleLeftRight(event.logicalKey == LogicalKeyboardKey.arrowRight);
+    } else if (event.logicalKey == LogicalKeyboardKey.goBack ||
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      Navigator.pop(context);
+    }
+  }
+
+  void _handleSelect() {
+    switch (_selectedIndex) {
+      case 0: // Nombre del grupo
+        _showRenameDialog();
+        break;
+      case 1: // Restaurar nombre
+        widget.onRestoreName();
+        Navigator.pop(context);
+        break;
+      case 2: // Ordenar canales - cycle through options
+        _cycleSortOrder();
+        break;
+      case 3: // Solo favoritos - toggle
+        setState(() {
+          _showFavoritesOnly = !_showFavoritesOnly;
+        });
+        widget.onShowFavoritesOnlyChanged(_showFavoritesOnly);
+        break;
+      case 4: // Ocultar grupo
+        widget.onHide();
+        Navigator.pop(context);
+        break;
+    }
+  }
+
+  void _handleLeftRight(bool isRight) {
+    if (_selectedIndex == 2) {
+      // Sort order
+      _cycleSortOrder(forward: isRight);
+    } else if (_selectedIndex == 3) {
+      // Favorites toggle
+      setState(() {
+        _showFavoritesOnly = !_showFavoritesOnly;
+      });
+      widget.onShowFavoritesOnlyChanged(_showFavoritesOnly);
+    }
+  }
+
+  void _cycleSortOrder({bool forward = true}) {
+    final orders = ChannelSortOrder.values;
+    final currentIdx = orders.indexOf(_sortOrder);
+    final newIdx = forward
+        ? (currentIdx + 1) % orders.length
+        : (currentIdx - 1 + orders.length) % orders.length;
+    setState(() {
+      _sortOrder = orders[newIdx];
+    });
+    widget.onSortOrderChanged(_sortOrder);
+  }
+
+  void _showRenameDialog() {
+    Navigator.pop(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => _RenameDialog(
+        currentName: widget.displayName,
+        originalName: widget.category.categoryName,
+        onSave: widget.onRename,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      onKeyEvent: _handleKey,
+      child: AlertDialog(
+        backgroundColor: Colors.grey[900],
+        contentPadding: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        content: SizedBox(
+          width: 350,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  color: Colors.deepPurple,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+                ),
+                child: Text(
+                  widget.displayName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              // Menu items
+              _buildMenuItem(0, 'Nombre del grupo', widget.displayName),
+              _buildMenuItem(
+                1,
+                'Restaurar nombre',
+                widget.category.categoryName,
+                isSubtle: true,
+              ),
+              _buildMenuItem(
+                2,
+                'Ordenar canales',
+                _getSortOrderLabel(),
+                hasArrows: true,
+              ),
+              _buildToggleItem(3, 'Solo favoritos', _showFavoritesOnly),
+              _buildMenuItem(4, 'Ocultar grupo', null, isDestructive: true),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuItem(
+    int index,
+    String label,
+    String? value, {
+    bool isSubtle = false,
+    bool hasArrows = false,
+    bool isDestructive = false,
+  }) {
+    final isSelected = index == _selectedIndex;
+
+    return Container(
+      color: isSelected
+          ? Colors.deepPurple.withValues(alpha: 0.3)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() => _selectedIndex = index);
+          _handleSelect();
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: isDestructive ? Colors.red : Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (value != null)
+                      Text(
+                        value,
+                        style: TextStyle(
+                          color: isSubtle
+                              ? Colors.white38
+                              : Colors.white.withValues(alpha: 0.7),
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (hasArrows && isSelected) ...[
+                const Icon(Icons.chevron_left, color: Colors.white54, size: 20),
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.chevron_right,
+                  color: Colors.white54,
+                  size: 20,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToggleItem(int index, String label, bool value) {
+    final isSelected = index == _selectedIndex;
+
+    return Container(
+      color: isSelected
+          ? Colors.deepPurple.withValues(alpha: 0.3)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() => _selectedIndex = index);
+          _handleSelect();
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Switch(
+                value: value,
+                onChanged: (v) {
+                  setState(() {
+                    _showFavoritesOnly = v;
+                  });
+                  widget.onShowFavoritesOnlyChanged(v);
+                },
+                activeTrackColor: Colors.deepPurple,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Rename dialog for category
+class _RenameDialog extends StatefulWidget {
+  final String currentName;
+  final String originalName;
+  final Function(String) onSave;
+
+  const _RenameDialog({
+    required this.currentName,
+    required this.originalName,
+    required this.onSave,
+  });
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.currentName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.grey[900],
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      title: const Text(
+        'Renombrar grupo',
+        style: TextStyle(color: Colors.white),
+      ),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: widget.originalName,
+          hintStyle: const TextStyle(color: Colors.white38),
+          enabledBorder: const UnderlineInputBorder(
+            borderSide: BorderSide(color: Colors.white24),
+          ),
+          focusedBorder: const UnderlineInputBorder(
+            borderSide: BorderSide(color: Colors.deepPurple),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        TextButton(
+          onPressed: () {
+            final name = _controller.text.trim();
+            if (name.isNotEmpty) {
+              widget.onSave(name);
+            }
+            Navigator.pop(context);
+          },
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

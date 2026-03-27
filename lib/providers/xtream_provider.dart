@@ -7,6 +7,7 @@ import '../services/epg_service.dart';
 import '../models/channel.dart';
 import '../services/history_service.dart';
 import '../services/hidden_channels_service.dart';
+import '../services/category_settings_service.dart';
 
 // SharedPreferences provider
 final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
@@ -110,6 +111,76 @@ class HiddenChannelsNotifier extends StateNotifier<Set<int>> {
 
   bool isHidden(int streamId) {
     return _service.isHidden(streamId);
+  }
+}
+
+// ── CATEGORÍAS (SETTINGS Y OCULTAS) ─────────────────
+final categorySettingsServiceProvider = Provider<CategorySettingsService>((
+  ref,
+) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return CategorySettingsService(prefs);
+});
+
+final hiddenCategoryIdsProvider =
+    StateNotifierProvider<HiddenCategoriesNotifier, Set<String>>((ref) {
+      final service = ref.watch(categorySettingsServiceProvider);
+      return HiddenCategoriesNotifier(service);
+    });
+
+class HiddenCategoriesNotifier extends StateNotifier<Set<String>> {
+  final CategorySettingsService _service;
+
+  HiddenCategoriesNotifier(this._service)
+    : super(_service.getHiddenCategoryIds());
+
+  Future<void> hide(String categoryId) async {
+    await _service.hideCategory(categoryId);
+    state = _service.getHiddenCategoryIds();
+  }
+
+  Future<void> unhide(String categoryId) async {
+    await _service.unhideCategory(categoryId);
+    state = _service.getHiddenCategoryIds();
+  }
+
+  bool isHidden(String categoryId) {
+    return _service.isHidden(categoryId);
+  }
+}
+
+final categorySettingsProvider =
+    StateNotifierProvider<
+      CategorySettingsNotifier,
+      Map<String, CategorySettings>
+    >((ref) {
+      final service = ref.watch(categorySettingsServiceProvider);
+      return CategorySettingsNotifier(service);
+    });
+
+class CategorySettingsNotifier
+    extends StateNotifier<Map<String, CategorySettings>> {
+  final CategorySettingsService _service;
+
+  CategorySettingsNotifier(this._service) : super(_service.getAllSettings());
+
+  CategorySettings getSettings(String categoryId) {
+    return state[categoryId] ?? const CategorySettings();
+  }
+
+  Future<void> setCustomName(String categoryId, String? name) async {
+    await _service.setCustomName(categoryId, name);
+    state = _service.getAllSettings();
+  }
+
+  Future<void> setSortOrder(String categoryId, ChannelSortOrder order) async {
+    await _service.setSortOrder(categoryId, order);
+    state = _service.getAllSettings();
+  }
+
+  Future<void> setShowFavoritesOnly(String categoryId, bool value) async {
+    await _service.setShowFavoritesOnly(categoryId, value);
+    state = _service.getAllSettings();
   }
 }
 
