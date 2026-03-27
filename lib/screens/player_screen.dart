@@ -58,6 +58,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   Timer? _longPressTimer;
   bool _isLongPress = false;
 
+  // Flag para bloquear teclas cuando hay diálogo abierto
+  bool _isDialogOpen = false;
+
   // Buffering timeout y auto-retry
   Timer? _bufferingTimeoutTimer;
   int _retryCount = 0;
@@ -293,6 +296,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _onKey(KeyEvent event) {
     if (!mounted) return false;
 
+    // Si hay un diálogo abierto, no interceptar teclas
+    if (_isDialogOpen) return false;
+
     final isSelectKey =
         event.logicalKey == LogicalKeyboardKey.select ||
         event.logicalKey == LogicalKeyboardKey.enter;
@@ -394,6 +400,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final tracks = _player.state.tracks.audio;
     if (tracks.isEmpty) return;
 
+    _isDialogOpen = true;
     showDialog(
       context: context,
       builder: (context) => _buildTrackDialog(
@@ -409,12 +416,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           Navigator.pop(context);
         },
       ),
-    );
+    ).then((_) => _isDialogOpen = false);
   }
 
   void _showSubtitleTrackDialog() {
     final tracks = _player.state.tracks.subtitle;
 
+    _isDialogOpen = true;
     showDialog(
       context: context,
       builder: (context) => _buildTrackDialog(
@@ -438,7 +446,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           Navigator.pop(context);
         },
       ),
-    );
+    ).then((_) => _isDialogOpen = false);
   }
 
   Widget _buildTrackDialog({

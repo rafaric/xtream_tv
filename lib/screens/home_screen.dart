@@ -32,6 +32,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   VideoController? _previewController;
   bool _playerScreenOpen = false;
 
+  // Long press detection para context menu
+  Timer? _longPressTimer;
+  bool _isLongPress = false;
+
+  // Flag para bloquear teclas cuando hay diálogo abierto
+  bool _isDialogOpen = false;
+
   final _categoryScrollController = ScrollController();
   final _contentScrollController = ScrollController();
 
@@ -452,16 +459,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ── GRILLAS DE CONTENIDO ─────────────────────────────
 
   Widget _buildLiveGrid(List<XtreamChannel> channels) {
-    if (channels.isEmpty) {
+    final hiddenIds = ref.watch(hiddenChannelIdsProvider);
+    final filteredChannels = channels
+        .where((c) => !hiddenIds.contains(c.streamId))
+        .toList();
+
+    if (filteredChannels.isEmpty) {
       return _buildEmptyWidget('No hay canales en esta categoría');
     }
     final epgMapAsync = ref.watch(epgMapProvider);
     final favoriteIds = ref.watch(favoriteIdsProvider);
 
     return epgMapAsync.when(
-      loading: () => _buildChannelList(channels, {}, favoriteIds),
-      error: (e, _) => _buildChannelList(channels, {}, favoriteIds),
-      data: (epgMap) => _buildChannelList(channels, epgMap, favoriteIds),
+      loading: () => _buildChannelList(filteredChannels, {}, favoriteIds),
+      error: (e, _) => _buildChannelList(filteredChannels, {}, favoriteIds),
+      data: (epgMap) =>
+          _buildChannelList(filteredChannels, epgMap, favoriteIds),
     );
   }
 
@@ -558,7 +571,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ) {
     return GestureDetector(
       onTap: () => _openLivePlayer(channel),
-      onLongPress: () => _toggleFavorite(channel, isFav),
+      onLongPress: () => _showChannelContextMenu(channel, isFav),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
@@ -766,7 +779,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildChannelCard(XtreamChannel channel, bool isSelected, bool isFav) {
     return GestureDetector(
       onTap: () => _openLivePlayer(channel),
-      onLongPress: () => _toggleFavorite(channel, isFav),
+      onLongPress: () => _showChannelContextMenu(channel, isFav),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
@@ -1016,6 +1029,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ── NAVEGACIÓN POR TECLADO ───────────────────────────
 
   void _handleGlobalKey(KeyEvent event) {
+    // Si hay un diálogo abierto, no interceptar teclas
+    if (_isDialogOpen) return;
+
+    final isSelectKey =
+        event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter;
+
+    // ─────────────────────────────────────────────────────────────
+    // LONG PRESS DETECTION para context menu (solo en columna de contenido)
+    // ─────────────────────────────────────────────────────────────
+    if (isSelectKey && _focusColumn == 2) {
+      if (event is KeyDownEvent) {
+        _isLongPress = false;
+        _longPressTimer?.cancel();
+        _longPressTimer = Timer(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            _isLongPress = true;
+            _handleLongPress();
+          }
+        });
+        return;
+      } else if (event is KeyUpEvent) {
+        _longPressTimer?.cancel();
+        if (!_isLongPress) {
+          // Short press: abrir contenido
+          _handleSelect();
+        }
+        _isLongPress = false;
+        return;
+      }
+    }
+
+    // Solo procesar KeyDownEvent para el resto de teclas
     if (event is! KeyDownEvent) return;
 
     if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
@@ -1026,9 +1072,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _navigateUp();
     } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       _navigateDown();
-    } else if (event.logicalKey == LogicalKeyboardKey.select ||
-        event.logicalKey == LogicalKeyboardKey.enter) {
+    } else if (isSelectKey) {
+      // Select en columnas 0 o 1 (no contenido)
       _handleSelect();
+    }
+  }
+
+  void _handleLongPress() {
+    final section = ref.read(mainSectionProvider);
+
+    // Solo mostrar context menu para Live TV y Favoritos
+    if (section == MainSection.live || section == MainSection.favorites) {
+      final channelsAsync = section == MainSection.favorites
+          ? ref.read(favoritesProvider)
+          : ref.read(channelsProvider(_getSelectedCategoryId() ?? '__all__'));
+      final channels = channelsAsync.maybeWhen(
+        data: (ch) => ch,
+        orElse: () => <XtreamChannel>[],
+      );
+      final hiddenIds = ref.read(hiddenChannelIdsProvider);
+      final filteredChannels = channels
+          .where((c) => !hiddenIds.contains(c.streamId))
+          .toList();
+
+      if (_selectedContentIndex < filteredChannels.length) {
+        final channel = filteredChannels[_selectedContentIndex];
+        final favIds = ref
+            .read(favoriteIdsProvider)
+            .maybeWhen(data: (ids) => ids, orElse: () => <int>{});
+        final isFav = favIds.contains(channel.streamId);
+        _showChannelContextMenu(channel, isFav);
+      }
     }
   }
 
@@ -1089,8 +1163,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         data: (ch) => ch,
         orElse: () => <XtreamChannel>[],
       );
-      if (_selectedContentIndex < channels.length) {
-        _openLivePlayer(channels[_selectedContentIndex]);
+      final hiddenIds = ref.read(hiddenChannelIdsProvider);
+      final filteredChannels = channels
+          .where((c) => !hiddenIds.contains(c.streamId))
+          .toList();
+      if (_selectedContentIndex < filteredChannels.length) {
+        _openLivePlayer(filteredChannels[_selectedContentIndex]);
       }
     } else if (section == MainSection.vod) {
       final vodAsync = ref.read(
@@ -1202,8 +1280,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       error: (e, _) => _buildErrorWidget(e.toString()),
       data: (allChannels) {
+        final hiddenIds = ref.watch(hiddenChannelIdsProvider);
         final groupChannels = allChannels
-            .where((c) => selectedGroup.channelIds.contains(c.streamId))
+            .where(
+              (c) =>
+                  selectedGroup.channelIds.contains(c.streamId) &&
+                  !hiddenIds.contains(c.streamId),
+            )
             .toList();
 
         return Stack(
@@ -1683,6 +1766,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  Future<void> _hideChannel(XtreamChannel channel) async {
+    await ref.read(hiddenChannelIdsProvider.notifier).hide(channel.streamId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${channel.name} ocultado'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.deepPurple,
+        ),
+      );
+    }
+  }
+
+  void _showChannelContextMenu(XtreamChannel channel, bool isFav) {
+    _isDialogOpen = true;
+    showDialog(
+      context: context,
+      builder: (context) => _ChannelContextMenuDialog(
+        channel: channel,
+        isFavorite: isFav,
+        onFavoriteToggle: () => _toggleFavorite(channel, isFav),
+        onHide: () => _hideChannel(channel),
+        onAddToGroup: (groupId) {
+          // TODO: Implement add to group
+        },
+        groups: ref.read(customGroupsProvider).map((g) => g.name).toList(),
+      ),
+    ).then((_) => _isDialogOpen = false);
+  }
+
   Future<void> _goToLogin() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('xtream_url');
@@ -1700,7 +1813,373 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _categoryScrollController.dispose();
     _contentScrollController.dispose();
     _previewTimer?.cancel();
+    _longPressTimer?.cancel();
     _previewPlayer?.dispose();
     super.dispose();
+  }
+}
+
+/// Context menu dialog for channel actions (D-pad compatible)
+class _ChannelContextMenuDialog extends StatefulWidget {
+  final XtreamChannel channel;
+  final bool isFavorite;
+  final VoidCallback onFavoriteToggle;
+  final VoidCallback onHide;
+  final Function(String) onAddToGroup;
+  final List<String> groups;
+
+  const _ChannelContextMenuDialog({
+    required this.channel,
+    required this.isFavorite,
+    required this.onFavoriteToggle,
+    required this.onHide,
+    required this.onAddToGroup,
+    required this.groups,
+  });
+
+  @override
+  State<_ChannelContextMenuDialog> createState() =>
+      _ChannelContextMenuDialogState();
+}
+
+class _ChannelContextMenuDialogState extends State<_ChannelContextMenuDialog> {
+  int _selectedIndex = 0;
+  late List<_MenuOption> _options;
+
+  @override
+  void initState() {
+    super.initState();
+    _options = [
+      _MenuOption(
+        icon: Icons.star,
+        label: widget.isFavorite
+            ? 'Quitar de favoritos'
+            : 'Agregar a favoritos',
+        onTap: widget.onFavoriteToggle,
+      ),
+      _MenuOption(
+        icon: Icons.visibility_off,
+        label: 'Ocultar canal',
+        onTap: widget.onHide,
+        isDestructive: true,
+      ),
+      if (widget.groups.isNotEmpty)
+        _MenuOption(
+          icon: Icons.folder,
+          label: 'Agregar a grupo',
+          onTap: () => _showGroupSubmenu(context),
+          closesDialog: false,
+        ),
+      _MenuOption(
+        icon: Icons.info_outline,
+        label: 'Info del canal',
+        onTap: () => _showChannelInfo(context),
+        closesDialog: false,
+      ),
+    ];
+  }
+
+  void _handleKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        _selectedIndex = (_selectedIndex - 1).clamp(0, _options.length - 1);
+      });
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      setState(() {
+        _selectedIndex = (_selectedIndex + 1).clamp(0, _options.length - 1);
+      });
+    } else if (event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter) {
+      final option = _options[_selectedIndex];
+      option.onTap();
+      if (option.closesDialog) {
+        Navigator.pop(context);
+      }
+    } else if (event.logicalKey == LogicalKeyboardKey.goBack ||
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      Navigator.pop(context);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      onKeyEvent: _handleKey,
+      child: AlertDialog(
+        backgroundColor: Colors.grey[900],
+        contentPadding: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header with channel name
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.channel.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(color: Colors.white24, height: 1),
+            // Menu options
+            ..._options.asMap().entries.map((entry) {
+              final index = entry.key;
+              final option = entry.value;
+              final isSelected = index == _selectedIndex;
+
+              return Container(
+                color: isSelected
+                    ? Colors.deepPurple.withValues(alpha: 0.5)
+                    : Colors.transparent,
+                child: InkWell(
+                  onTap: () {
+                    option.onTap();
+                    if (option.closesDialog) {
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          option.icon,
+                          color: option.isDestructive
+                              ? Colors.red
+                              : Colors.white,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            option.label,
+                            style: TextStyle(
+                              color: option.isDestructive
+                                  ? Colors.red
+                                  : Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        if (isSelected)
+                          const Icon(
+                            Icons.chevron_right,
+                            color: Colors.white54,
+                            size: 20,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showGroupSubmenu(BuildContext context) {
+    Navigator.pop(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => _GroupSubmenuDialog(
+        groups: widget.groups,
+        onSelect: widget.onAddToGroup,
+      ),
+    );
+  }
+
+  void _showChannelInfo(BuildContext context) {
+    Navigator.pop(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => _ChannelInfoDialog(channel: widget.channel),
+    );
+  }
+}
+
+class _MenuOption {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool isDestructive;
+  final bool closesDialog;
+
+  _MenuOption({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isDestructive = false,
+    this.closesDialog = true,
+  });
+}
+
+/// Group selection submenu (D-pad compatible)
+class _GroupSubmenuDialog extends StatefulWidget {
+  final List<String> groups;
+  final Function(String) onSelect;
+
+  const _GroupSubmenuDialog({required this.groups, required this.onSelect});
+
+  @override
+  State<_GroupSubmenuDialog> createState() => _GroupSubmenuDialogState();
+}
+
+class _GroupSubmenuDialogState extends State<_GroupSubmenuDialog> {
+  int _selectedIndex = 0;
+
+  void _handleKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        _selectedIndex = (_selectedIndex - 1).clamp(
+          0,
+          widget.groups.length - 1,
+        );
+      });
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      setState(() {
+        _selectedIndex = (_selectedIndex + 1).clamp(
+          0,
+          widget.groups.length - 1,
+        );
+      });
+    } else if (event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter) {
+      widget.onSelect(widget.groups[_selectedIndex]);
+      Navigator.pop(context);
+    } else if (event.logicalKey == LogicalKeyboardKey.goBack ||
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      Navigator.pop(context);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      onKeyEvent: _handleKey,
+      child: AlertDialog(
+        backgroundColor: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        title: const Text(
+          'Selecciona un grupo',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: widget.groups.asMap().entries.map((entry) {
+            final index = entry.key;
+            final group = entry.value;
+            final isSelected = index == _selectedIndex;
+
+            return Container(
+              color: isSelected
+                  ? Colors.deepPurple.withValues(alpha: 0.5)
+                  : Colors.transparent,
+              child: ListTile(
+                title: Text(group, style: const TextStyle(color: Colors.white)),
+                trailing: isSelected
+                    ? const Icon(Icons.check, color: Colors.white)
+                    : null,
+                onTap: () {
+                  widget.onSelect(group);
+                  Navigator.pop(context);
+                },
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+/// Channel info dialog (D-pad compatible)
+class _ChannelInfoDialog extends StatelessWidget {
+  final XtreamChannel channel;
+
+  const _ChannelInfoDialog({required this.channel});
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      onKeyEvent: (event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.goBack ||
+                event.logicalKey == LogicalKeyboardKey.escape ||
+                event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter)) {
+          Navigator.pop(context);
+        }
+      },
+      child: AlertDialog(
+        backgroundColor: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        title: const Text(
+          'Información del canal',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('Nombre', channel.name),
+            _buildInfoRow('ID', channel.streamId.toString()),
+            _buildInfoRow('Categoría', channel.categoryId),
+            _buildInfoRow('Tipo', channel.streamType),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        ],
+      ),
+    );
   }
 }
