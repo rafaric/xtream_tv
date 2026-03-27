@@ -416,11 +416,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       error: (e, _) => _buildErrorWidget(e.toString()),
       data: (categories) {
+        final hiddenIds = ref.watch(hiddenCategoryIdsProvider);
         final allCategories = [
           XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
-          ...categories,
+          ...categories.where((c) => !hiddenIds.contains(c.categoryId)),
         ];
         if (_selectedCategoryIndex >= allCategories.length) {
+          // Ajustar índice si quedó fuera de rango
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _selectedCategoryIndex = allCategories.length - 1;
+              });
+            }
+          });
           return const SizedBox();
         }
         final selected = allCategories[_selectedCategoryIndex];
@@ -1298,6 +1307,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   String? _getSelectedCategoryId() {
     final section = ref.read(mainSectionProvider);
+    final hiddenIds = ref.read(hiddenCategoryIdsProvider);
     AsyncValue<List<XtreamCategory>> categoriesAsync;
     switch (section) {
       case MainSection.vod:
@@ -1315,7 +1325,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
     final allCategories = [
       XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
-      ...categories,
+      ...categories.where((c) => !hiddenIds.contains(c.categoryId)),
     ];
     if (_selectedCategoryIndex >= allCategories.length) return null;
     final selected = allCategories[_selectedCategoryIndex];
