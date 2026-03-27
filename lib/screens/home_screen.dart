@@ -452,16 +452,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ── GRILLAS DE CONTENIDO ─────────────────────────────
 
   Widget _buildLiveGrid(List<XtreamChannel> channels) {
-    if (channels.isEmpty) {
+    final hiddenIds = ref.watch(hiddenChannelIdsProvider);
+    final filteredChannels = channels
+        .where((c) => !hiddenIds.contains(c.streamId))
+        .toList();
+
+    if (filteredChannels.isEmpty) {
       return _buildEmptyWidget('No hay canales en esta categoría');
     }
     final epgMapAsync = ref.watch(epgMapProvider);
     final favoriteIds = ref.watch(favoriteIdsProvider);
 
     return epgMapAsync.when(
-      loading: () => _buildChannelList(channels, {}, favoriteIds),
-      error: (e, _) => _buildChannelList(channels, {}, favoriteIds),
-      data: (epgMap) => _buildChannelList(channels, epgMap, favoriteIds),
+      loading: () => _buildChannelList(filteredChannels, {}, favoriteIds),
+      error: (e, _) => _buildChannelList(filteredChannels, {}, favoriteIds),
+      data: (epgMap) =>
+          _buildChannelList(filteredChannels, epgMap, favoriteIds),
     );
   }
 
@@ -558,7 +564,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ) {
     return GestureDetector(
       onTap: () => _openLivePlayer(channel),
-      onLongPress: () => _toggleFavorite(channel, isFav),
+      onLongPress: () => _showChannelContextMenu(channel, isFav),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
@@ -766,7 +772,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildChannelCard(XtreamChannel channel, bool isSelected, bool isFav) {
     return GestureDetector(
       onTap: () => _openLivePlayer(channel),
-      onLongPress: () => _toggleFavorite(channel, isFav),
+      onLongPress: () => _showChannelContextMenu(channel, isFav),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
@@ -1089,8 +1095,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         data: (ch) => ch,
         orElse: () => <XtreamChannel>[],
       );
-      if (_selectedContentIndex < channels.length) {
-        _openLivePlayer(channels[_selectedContentIndex]);
+      final hiddenIds = ref.read(hiddenChannelIdsProvider);
+      final filteredChannels = channels
+          .where((c) => !hiddenIds.contains(c.streamId))
+          .toList();
+      if (_selectedContentIndex < filteredChannels.length) {
+        _openLivePlayer(filteredChannels[_selectedContentIndex]);
       }
     } else if (section == MainSection.vod) {
       final vodAsync = ref.read(
@@ -1202,8 +1212,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       error: (e, _) => _buildErrorWidget(e.toString()),
       data: (allChannels) {
+        final hiddenIds = ref.watch(hiddenChannelIdsProvider);
         final groupChannels = allChannels
-            .where((c) => selectedGroup.channelIds.contains(c.streamId))
+            .where(
+              (c) =>
+                  selectedGroup.channelIds.contains(c.streamId) &&
+                  !hiddenIds.contains(c.streamId),
+            )
             .toList();
 
         return Stack(
@@ -1683,6 +1698,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  Future<void> _hideChannel(XtreamChannel channel) async {
+    await ref.read(hiddenChannelIdsProvider.notifier).hide(channel.streamId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${channel.name} ocultado'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.deepPurple,
+        ),
+      );
+    }
+  }
+
+  void _showChannelContextMenu(XtreamChannel channel, bool isFav) {
+    showDialog(
+      context: context,
+      builder: (context) => _ChannelContextMenuDialog(
+        channel: channel,
+        isFavorite: isFav,
+        onFavoriteToggle: () => _toggleFavorite(channel, isFav),
+        onHide: () => _hideChannel(channel),
+        onAddToGroup: (groupId) {
+          // TODO: Implement add to group
+        },
+        groups: ref.read(customGroupsProvider).map((g) => g.name).toList(),
+      ),
+    );
+  }
+
   Future<void> _goToLogin() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('xtream_url');
@@ -1702,5 +1746,202 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _previewTimer?.cancel();
     _previewPlayer?.dispose();
     super.dispose();
+  }
+}
+
+/// Context menu dialog for channel actions
+class _ChannelContextMenuDialog extends StatelessWidget {
+  final XtreamChannel channel;
+  final bool isFavorite;
+  final VoidCallback onFavoriteToggle;
+  final VoidCallback onHide;
+  final Function(String) onAddToGroup;
+  final List<String> groups;
+
+  const _ChannelContextMenuDialog({
+    required this.channel,
+    required this.isFavorite,
+    required this.onFavoriteToggle,
+    required this.onHide,
+    required this.onAddToGroup,
+    required this.groups,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.grey[900],
+      contentPadding: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header with channel name
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  channel.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(color: Colors.white24, height: 1),
+          // Menu options
+          _buildMenuOption(
+            context: context,
+            icon: Icons.star,
+            label: isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos',
+            onTap: onFavoriteToggle,
+          ),
+          _buildMenuOption(
+            context: context,
+            icon: Icons.visibility_off,
+            label: 'Ocultar canal',
+            onTap: onHide,
+            isDestructive: true,
+          ),
+          if (groups.isNotEmpty)
+            _buildMenuOption(
+              context: context,
+              icon: Icons.folder,
+              label: 'Agregar a grupo',
+              onTap: () {
+                Navigator.pop(context);
+                _showGroupSubmenu(context);
+              },
+            ),
+          _buildMenuOption(
+            context: context,
+            icon: Icons.info_outline,
+            label: 'Info del canal',
+            onTap: () {
+              Navigator.pop(context);
+              _showChannelInfo(context);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuOption({
+    required BuildContext context,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool isDestructive = false,
+  }) {
+    return InkWell(
+      onTap: () {
+        onTap();
+        Navigator.pop(context);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: isDestructive ? Colors.red : Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: TextStyle(
+                color: isDestructive ? Colors.red : Colors.white,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showGroupSubmenu(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        contentPadding: EdgeInsets.zero,
+        title: const Text(
+          'Selecciona un grupo',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: groups
+              .map(
+                (group) => ListTile(
+                  title: Text(
+                    group,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () {
+                    onAddToGroup(group);
+                    Navigator.pop(context);
+                  },
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+  }
+
+  void _showChannelInfo(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'Información del canal',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('Nombre', channel.name),
+            _buildInfoRow('ID', channel.streamId.toString()),
+            _buildInfoRow('Categoría', channel.categoryId),
+            _buildInfoRow('Tipo', channel.streamType),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        ],
+      ),
+    );
   }
 }
