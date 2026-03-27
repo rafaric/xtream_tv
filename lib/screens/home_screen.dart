@@ -23,7 +23,9 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  int _selectedCategoryIndex = 0;
+  int _selectedNavIndex =
+      1; // Índice en barra de navegación (0=nav), default Live TV
+  int _selectedCategoryIndex = 0; // Índice en lista de categorías
   int _selectedContentIndex = 0;
   int _focusColumn = 1; // 0=nav, 1=categorías, 2=contenido
   XtreamChannel? _previewChannel;
@@ -113,11 +115,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           // Items de navegación
           Expanded(
             child: Column(
-              children: _navItems.map((item) {
+              children: _navItems.asMap().entries.map((entry) {
+                final index = entry.key;
+                final item = entry.value;
                 final isSelected = currentSection == item['section'];
                 final isFocused =
-                    _focusColumn == 0 &&
-                    _navItems.indexOf(item) == _selectedCategoryIndex;
+                    _focusColumn == 0 && index == _selectedNavIndex;
                 return _buildNavItem(
                   icon: item['icon'] as IconData,
                   label: item['label'] as String,
@@ -127,6 +130,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ref.read(mainSectionProvider.notifier).state =
                         item['section'] as MainSection;
                     setState(() {
+                      _selectedNavIndex = index;
                       _selectedCategoryIndex = 0;
                       _selectedContentIndex = 0;
                       _focusColumn = 1;
@@ -1218,10 +1222,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _navigateUp() {
     setState(() {
-      if (_focusColumn == 0 || _focusColumn == 1) {
+      if (_focusColumn == 0) {
+        // Navegación principal (secciones)
+        if (_selectedNavIndex > 0) _selectedNavIndex--;
+      } else if (_focusColumn == 1) {
+        // Categorías
         if (_selectedCategoryIndex > 0) _selectedCategoryIndex--;
         _scrollCategoryToSelected();
       } else {
+        // Contenido
         if (_selectedContentIndex > 0) _selectedContentIndex--;
         _scrollContentToSelected();
       }
@@ -1230,10 +1239,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _navigateDown() {
     setState(() {
-      if (_focusColumn == 0 || _focusColumn == 1) {
+      if (_focusColumn == 0) {
+        // Navegación principal (secciones)
+        if (_selectedNavIndex < _navItems.length - 1) _selectedNavIndex++;
+      } else if (_focusColumn == 1) {
+        // Categorías
         _selectedCategoryIndex++;
         _scrollCategoryToSelected();
       } else {
+        // Contenido
         _selectedContentIndex++;
         _scrollContentToSelected();
       }
@@ -1242,9 +1256,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _handleSelect() {
     if (_focusColumn == 0) {
-      final section =
-          _navItems[_selectedCategoryIndex % _navItems.length]['section']
-              as MainSection;
+      final section = _navItems[_selectedNavIndex]['section'] as MainSection;
       ref.read(mainSectionProvider.notifier).state = section;
       setState(() {
         _selectedCategoryIndex = 0;
