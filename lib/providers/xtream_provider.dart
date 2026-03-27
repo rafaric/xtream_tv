@@ -6,6 +6,7 @@ import '../services/custom_groups_service.dart';
 import '../services/epg_service.dart';
 import '../models/channel.dart';
 import '../services/history_service.dart';
+import '../services/hidden_channels_service.dart';
 
 // SharedPreferences provider
 final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
@@ -79,6 +80,38 @@ final favoriteIdsProvider = FutureProvider<Set<int>>((ref) async {
   final favs = await ref.read(favoritesServiceProvider).getFavorites();
   return favs.map((c) => c.streamId).toSet();
 });
+
+// ── CANALES OCULTOS ──────────────────────────────────
+final hiddenChannelsServiceProvider = Provider<HiddenChannelsService>((ref) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return HiddenChannelsService(prefs);
+});
+
+final hiddenChannelIdsProvider =
+    StateNotifierProvider<HiddenChannelsNotifier, Set<int>>((ref) {
+      final service = ref.watch(hiddenChannelsServiceProvider);
+      return HiddenChannelsNotifier(service);
+    });
+
+class HiddenChannelsNotifier extends StateNotifier<Set<int>> {
+  final HiddenChannelsService _service;
+
+  HiddenChannelsNotifier(this._service) : super(_service.getHiddenIds());
+
+  Future<void> hide(int streamId) async {
+    await _service.hide(streamId);
+    state = _service.getHiddenIds();
+  }
+
+  Future<void> unhide(int streamId) async {
+    await _service.unhide(streamId);
+    state = _service.getHiddenIds();
+  }
+
+  bool isHidden(int streamId) {
+    return _service.isHidden(streamId);
+  }
+}
 
 // ── NAVEGACIÓN ───────────────────────────────────────
 enum MainSection { live, vod, series, favorites, search, groups }
