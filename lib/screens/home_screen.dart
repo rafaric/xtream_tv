@@ -33,6 +33,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Preview temporalmente deshabilitado
   // VlcPlayerController? _previewController;
   bool _playerScreenOpen = false;
+  bool _detailScreenOpen = false;
 
   // Long press detection para context menu
   Timer? _longPressTimer;
@@ -1083,6 +1084,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void _handleGlobalKey(KeyEvent event) {
     // Si el player está abierto, ignorar todas las teclas
     if (_playerScreenOpen) return;
+    // Si hay un detail screen abierto, ignorar todas las teclas
+    if (_detailScreenOpen) return;
     // Si hay un diálogo abierto, no interceptar teclas
     if (_isDialogOpen) return;
 
@@ -1122,14 +1125,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // Solo procesar KeyDownEvent para el resto de teclas
     if (event is! KeyDownEvent) return;
 
+    final section = ref.read(mainSectionProvider);
+    final isGrid = section == MainSection.vod || section == MainSection.series;
+
     if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-      if (_focusColumn > 0) setState(() => _focusColumn--);
+      if (_focusColumn == 2 && isGrid) {
+        // Navegación en grilla: izquierda = columna anterior
+        final canGoLeft = _navigateGrid(0, -1);
+        if (!canGoLeft) {
+          // Si estamos en la primera columna, volver a categorías
+          setState(() => _focusColumn = 1);
+        }
+      } else if (_focusColumn > 0) {
+        setState(() => _focusColumn--);
+      }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-      if (_focusColumn < 2) setState(() => _focusColumn++);
+      if (_focusColumn == 2 && isGrid) {
+        // Navegación en grilla: derecha = siguiente columna
+        _navigateGrid(0, 1);
+      } else if (_focusColumn < 2) {
+        setState(() => _focusColumn++);
+      }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _navigateUp();
+      if (_focusColumn == 2 && isGrid) {
+        // Navegación en grilla: arriba = fila anterior
+        _navigateGrid(-1, 0);
+      } else {
+        _navigateUp();
+      }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      _navigateDown();
+      if (_focusColumn == 2 && isGrid) {
+        // Navegación en grilla: abajo = fila siguiente
+        _navigateGrid(1, 0);
+      } else {
+        _navigateDown();
+      }
     } else if (isSelectKey) {
       // Select en columnas 0 o 1 (no contenido)
       _handleSelect();
@@ -1242,11 +1272,111 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _selectedCategoryIndex++;
         _scrollCategoryToSelected();
       } else {
-        // Contenido
-        _selectedContentIndex++;
-        _scrollContentToSelected();
+        // Contenido - detectar grilla vs lista
+        final section = ref.read(mainSectionProvider);
+        final isGrid =
+            section == MainSection.vod || section == MainSection.series;
+
+        if (isGrid) {
+          // Grilla: usar navegación 2D
+          _navigateGrid(1, 0);
+        } else {
+          // Lista: navegación lineal simple (Live TV, Favorites)
+          int itemCount = 0;
+          if (section == MainSection.live) {
+            final categoryId = _getSelectedCategoryId() ?? '__all__';
+            final channelsAsync = ref.read(channelsProvider(categoryId));
+            itemCount = channelsAsync.maybeWhen(
+              data: (ch) {
+                final hiddenIds = ref.read(hiddenChannelIdsProvider);
+                return ch.where((c) => !hiddenIds.contains(c.streamId)).length;
+              },
+              orElse: () => 0,
+            );
+          } else if (section == MainSection.favorites) {
+            final favsAsync = ref.read(favoritesProvider);
+            itemCount = favsAsync.maybeWhen(
+              data: (ch) => ch.length,
+              orElse: () => 0,
+            );
+          }
+
+          // Incrementar índice si no está al final
+          if (_selectedContentIndex < itemCount - 1) {
+            _selectedContentIndex++;
+            _scrollContentToSelected();
+          }
+        }
       }
     });
+  }
+
+  // Navegación para grids (VOD/Series)
+  // rowDelta: +1 para abajo, -1 para arriba, 0 para mantener
+  // colDelta: +1 para derecha, -1 para izquierda, 0 para mantener
+  // Retorna false si estamos en el borde izquierdo y queremos ir más a la izquierda
+  bool _navigateGrid(int rowDelta, int colDelta) {
+    final section = ref.read(mainSectionProvider);
+
+    // Obtener cantidad de items en la grilla
+    int itemCount = 0;
+    if (section == MainSection.vod) {
+      final categoryId = _getSelectedCategoryId() ?? '__all__';
+      final vodAsync = ref.read(vodStreamsProvider(categoryId));
+      itemCount = vodAsync.maybeWhen(data: (v) => v.length, orElse: () => 0);
+    } else if (section == MainSection.series) {
+      final categoryId = _getSelectedCategoryId() ?? '__all__';
+      final seriesAsync = ref.read(seriesProvider(categoryId));
+      itemCount = seriesAsync.maybeWhen(data: (s) => s.length, orElse: () => 0);
+    }
+
+    if (itemCount == 0) return false;
+
+    const columnsPerRow = 5; // 5 columnas en la grilla
+
+    // Calcular posición actual
+    final currentRow = _selectedContentIndex ~/ columnsPerRow;
+    final currentCol = _selectedContentIndex % columnsPerRow;
+
+    // Si estamos en la primera columna y queremos ir a la izquierda,
+    // retornar false para que el caller cambie a la columna de categorías
+    if (currentCol == 0 && colDelta < 0) {
+      return false;
+    }
+
+    // Calcular nueva posición
+    int newRow = currentRow + rowDelta;
+    int newCol = currentCol + colDelta;
+
+    // Manejar bordes
+    if (newCol < 0) {
+      // Ir a la fila anterior, última columna
+      newCol = columnsPerRow - 1;
+      newRow--;
+    } else if (newCol >= columnsPerRow) {
+      // Ir a la siguiente fila, primera columna
+      newCol = 0;
+      newRow++;
+    }
+
+    // Calcular nuevo índice
+    int newIndex = newRow * columnsPerRow + newCol;
+
+    // Verificar que no pase el límite
+    if (newIndex >= itemCount) {
+      // Ajustar a la última posición válida
+      newIndex = itemCount - 1;
+    }
+
+    if (newIndex >= 0 && newIndex < itemCount) {
+      setState(() {
+        _selectedContentIndex = newIndex;
+      });
+      _scrollContentToSelected();
+      return true;
+    }
+
+    return false;
   }
 
   void _handleSelect() {
@@ -1352,9 +1482,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _scrollContentToSelected() {
-    const itemHeight = 72.0;
-    final offset = _selectedContentIndex * itemHeight;
-    if (_contentScrollController.hasClients) {
+    if (!_contentScrollController.hasClients) return;
+
+    final section = ref.read(mainSectionProvider);
+
+    // Para grillas (VOD/Series), calcular offset basado en filas
+    if (section == MainSection.vod || section == MainSection.series) {
+      const columnsPerRow = 5;
+      const itemHeight = 220.0; // Altura aproximada de cada card en la grilla
+      final currentRow = _selectedContentIndex ~/ columnsPerRow;
+      final offset = currentRow * itemHeight;
+
+      _contentScrollController.animateTo(
+        offset,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    } else {
+      // Para listas (Live TV, Favoritos)
+      const itemHeight = 72.0;
+      final offset = _selectedContentIndex * itemHeight;
+
       _contentScrollController.animateTo(
         offset,
         duration: const Duration(milliseconds: 200),
@@ -1823,15 +1971,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _openVodDetail(VodStream vod) {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => VodDetailScreen(vod: vod)));
+    _detailScreenOpen = true;
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => VodDetailScreen(vod: vod)))
+        .then((_) => _detailScreenOpen = false);
   }
 
   void _openSeriesDetail(Series series) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => SeriesDetailScreen(series: series)),
-    );
+    _detailScreenOpen = true;
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(builder: (_) => SeriesDetailScreen(series: series)),
+        )
+        .then((_) => _detailScreenOpen = false);
   }
 
   Future<void> _toggleFavorite(XtreamChannel channel, bool isFav) async {
