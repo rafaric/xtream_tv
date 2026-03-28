@@ -8,6 +8,7 @@ import '../services/category_settings_service.dart';
 import '../services/navigation/grid_navigation_controller.dart';
 import '../services/navigation/list_navigation_controller.dart';
 import '../services/navigation/navigation_models.dart';
+import '../services/navigation/navigation_constants.dart';
 import 'login_screen.dart';
 import 'player_screen.dart';
 import 'vod_detail_screen.dart';
@@ -1143,7 +1144,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (isGrid) {
       final controller = GridNavigationController(
         itemCount: itemCount,
-        columnsPerRow: 5,
+        columnsPerRow: NavigationConstants.gridColumnsPerRow,
         initialIndex: _selectedContentIndex,
       );
       return navigate(controller);
@@ -1321,7 +1322,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           if (itemCount > 0) {
             final controller = GridNavigationController(
               itemCount: itemCount,
-              columnsPerRow: 5,
+              columnsPerRow: NavigationConstants.gridColumnsPerRow,
               initialIndex: _selectedContentIndex,
             );
             result = controller.navigateDown();
@@ -1568,10 +1569,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Para grillas (VOD/Series), calcular offset basado en filas
     if (section == MainSection.vod || section == MainSection.series) {
-      const columnsPerRow = 5;
-      const itemHeight = 220.0; // Altura aproximada de cada card en la grilla
-      final currentRow = _selectedContentIndex ~/ columnsPerRow;
-      final offset = currentRow * itemHeight;
+      final currentRow =
+          _selectedContentIndex ~/ NavigationConstants.gridColumnsPerRow;
+      final offset = currentRow * NavigationConstants.gridItemHeight;
 
       _contentScrollController.animateTo(
         offset,
