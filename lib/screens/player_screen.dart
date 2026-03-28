@@ -37,6 +37,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   final _epgChannelScrollController = ScrollController();
   bool _showHistoryOverlay = false;
 
+  // Canales para el EPG - puede cambiar si se elige canal de otra categoría
+  late List<XtreamChannel> _epgChannels;
+
   String? _streamError;
   bool _showOptionsMenu = false;
   int _selectedMenuIndex = 0;
@@ -51,13 +54,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     super.initState();
     _currentChannel = widget.channel;
     _currentStreamUrl = widget.streamUrl;
+    _epgChannels = widget.categoryChannels;
 
     debugPrint('🎬 PlayerScreen initState');
     debugPrint('🔗 Stream URL: $_currentStreamUrl');
 
     _initializePlayer();
 
-    final idx = widget.categoryChannels.indexWhere(
+    final idx = _epgChannels.indexWhere(
       (c) => c.streamId == _currentChannel.streamId,
     );
     if (idx != -1) _epgPanelChannelIndex = idx;
@@ -178,6 +182,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     _retryCount = 0;
 
+    // Si el canal es de otra categoría, actualizar la lista del EPG
+    final isFromDifferentCategory = !_epgChannels.any(
+      (c) => c.streamId == channel.streamId,
+    );
+
+    if (isFromDifferentCategory && channel.categoryId.isNotEmpty) {
+      // Cargar canales de la nueva categoría
+      final newChannels = await ref.read(
+        channelsProvider(channel.categoryId).future,
+      );
+      _epgChannels = newChannels;
+      _epgPanelChannelIndex = _epgChannels.indexWhere(
+        (c) => c.streamId == channel.streamId,
+      );
+      if (_epgPanelChannelIndex < 0) _epgPanelChannelIndex = 0;
+    }
+
     setState(() {
       _currentChannel = channel;
       _currentStreamUrl = url;
@@ -205,8 +226,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _goBack() {
     if (_isDisposed) return;
     _isDisposed = true;
+    // Remover handler ANTES del pop para evitar propagación
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    _longPressTimer?.cancel();
     _controller?.dispose();
-    Navigator.of(context).pop();
+    // Usar Future.microtask para asegurar que el pop ocurra después de consumir el evento
+    Future.microtask(() {
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    });
   }
 
   bool _onKey(KeyEvent event) {
@@ -288,8 +317,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       setState(() => _showHistoryOverlay = true);
     } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-      if (widget.categoryChannels.isNotEmpty) {
-        setState(() => _showEpgPanel = true);
+      if (_epgChannels.isNotEmpty) {
+        // Posicionar en el canal actual al abrir el panel EPG
+        final currentIdx = _epgChannels.indexWhere(
+          (c) => c.streamId == _currentChannel.streamId,
+        );
+        setState(() {
+          _showEpgPanel = true;
+          _epgPanelChannelIndex = currentIdx != -1 ? currentIdx : 0;
+        });
+        // Scroll al canal actual después de que se renderice
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollEpgToIndex(_epgPanelChannelIndex);
+        });
       }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
       _switchToPreviousChannel();
@@ -379,7 +419,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _navigateEpgPanel(int direction) {
     final newIndex = _epgPanelChannelIndex + direction;
-    if (newIndex >= 0 && newIndex < widget.categoryChannels.length) {
+    if (newIndex >= 0 && newIndex < _epgChannels.length) {
       setState(() => _epgPanelChannelIndex = newIndex);
       _scrollEpgToIndex(newIndex);
     }
@@ -388,8 +428,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _scrollEpgToIndex(int index) {
     const itemHeight = 72.0;
     if (_epgChannelScrollController.hasClients) {
+      // Centrar el item en la vista (restar mitad de la altura visible)
+      final viewportHeight =
+          _epgChannelScrollController.position.viewportDimension;
+      final targetOffset =
+          (index * itemHeight) - (viewportHeight / 2) + (itemHeight / 2);
+      final clampedOffset = targetOffset.clamp(
+        0.0,
+        _epgChannelScrollController.position.maxScrollExtent,
+      );
       _epgChannelScrollController.animateTo(
-        index * itemHeight,
+        clampedOffset,
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
@@ -397,26 +446,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _selectEpgChannel() {
-    if (_epgPanelChannelIndex < widget.categoryChannels.length) {
-      _switchChannel(widget.categoryChannels[_epgPanelChannelIndex]);
+    if (_epgPanelChannelIndex < _epgChannels.length) {
+      _switchChannel(_epgChannels[_epgPanelChannelIndex]);
     }
   }
 
   void _switchToNextChannel() {
-    final idx = widget.categoryChannels.indexWhere(
+    final idx = _epgChannels.indexWhere(
       (c) => c.streamId == _currentChannel.streamId,
     );
-    if (idx >= 0 && idx < widget.categoryChannels.length - 1) {
-      _switchChannel(widget.categoryChannels[idx + 1]);
+    if (idx >= 0 && idx < _epgChannels.length - 1) {
+      _switchChannel(_epgChannels[idx + 1]);
     }
   }
 
   void _switchToPreviousChannel() {
-    final idx = widget.categoryChannels.indexWhere(
+    final idx = _epgChannels.indexWhere(
       (c) => c.streamId == _currentChannel.streamId,
     );
     if (idx > 0) {
-      _switchChannel(widget.categoryChannels[idx - 1]);
+      _switchChannel(_epgChannels[idx - 1]);
     }
   }
 
@@ -659,9 +708,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             Expanded(
               child: ListView.builder(
                 controller: _epgChannelScrollController,
-                itemCount: widget.categoryChannels.length,
+                itemCount: _epgChannels.length,
                 itemBuilder: (context, index) {
-                  final channel = widget.categoryChannels[index];
+                  final channel = _epgChannels[index];
                   final isSelected = index == _epgPanelChannelIndex;
                   final isCurrent =
                       channel.streamId == _currentChannel.streamId;

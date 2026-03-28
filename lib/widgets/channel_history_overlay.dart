@@ -31,7 +31,17 @@ class _ChannelHistoryOverlayState extends State<ChannelHistoryOverlay> {
   @override
   void initState() {
     super.initState();
+    _selectedIndex = 0; // Siempre empezar desde el primer canal
     HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  @override
+  void didUpdateWidget(ChannelHistoryOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Resetear índice si cambió el canal actual (el historial se filtró diferente)
+    if (oldWidget.currentChannel.streamId != widget.currentChannel.streamId) {
+      _selectedIndex = 0;
+    }
   }
 
   @override
@@ -48,6 +58,11 @@ class _ChannelHistoryOverlayState extends State<ChannelHistoryOverlay> {
         .where((c) => c.streamId != widget.currentChannel.streamId)
         .toList();
 
+    // Asegurar que el índice esté en rango
+    if (_selectedIndex >= history.length) {
+      _selectedIndex = history.isEmpty ? 0 : history.length - 1;
+    }
+
     if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
       if (_selectedIndex > 0) {
         setState(() => _selectedIndex--);
@@ -61,7 +76,11 @@ class _ChannelHistoryOverlayState extends State<ChannelHistoryOverlay> {
     } else if (event.logicalKey == LogicalKeyboardKey.select ||
         event.logicalKey == LogicalKeyboardKey.enter) {
       if (history.isNotEmpty && _selectedIndex < history.length) {
-        widget.onChannelSelected(history[_selectedIndex]);
+        final selectedChannel = history[_selectedIndex];
+        debugPrint(
+          '🎯 History: selecting index $_selectedIndex -> ${selectedChannel.name} (ID: ${selectedChannel.streamId})',
+        );
+        widget.onChannelSelected(selectedChannel);
       }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
         event.logicalKey == LogicalKeyboardKey.goBack ||
@@ -108,21 +127,21 @@ class _ChannelHistoryOverlayState extends State<ChannelHistoryOverlay> {
         .toList();
 
     return Container(
-        color: Colors.transparent,
-        child: Column(
-          children: [
-            // Spacer para empujar contenido abajo
-            const Spacer(),
+      color: Colors.transparent,
+      child: Column(
+        children: [
+          // Spacer para empujar contenido abajo
+          const Spacer(),
 
-            // Info del canal actual
-            _buildCurrentChannelInfo(),
+          // Info del canal actual
+          _buildCurrentChannelInfo(),
 
-            // Carrusel de historial
-            if (history.isNotEmpty) _buildHistoryCarousel(history),
+          // Carrusel de historial
+          if (history.isNotEmpty) _buildHistoryCarousel(history),
 
-            const SizedBox(height: 16),
-          ],
-        ),
+          const SizedBox(height: 16),
+        ],
+      ),
     );
   }
 

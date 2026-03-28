@@ -1081,6 +1081,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ── NAVEGACIÓN POR TECLADO ───────────────────────────
 
   void _handleGlobalKey(KeyEvent event) {
+    // Si el player está abierto, ignorar todas las teclas
+    if (_playerScreenOpen) return;
     // Si hay un diálogo abierto, no interceptar teclas
     if (_isDialogOpen) return;
 
