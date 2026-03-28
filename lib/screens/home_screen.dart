@@ -48,10 +48,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _categoryScrollController = ScrollController();
   final _contentScrollController = ScrollController();
 
-  // Navigation controllers
-  GridNavigationController? _gridController;
-  ListNavigationController? _listController;
-
   // Íconos y labels de la barra lateral
   final List<Map<String, dynamic>> _navItems = [
     {'icon': Icons.search, 'label': 'Buscar', 'section': MainSection.search},
@@ -241,9 +237,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildCategoriesList(List<XtreamCategory> categories) {
     final hiddenIds = ref.watch(hiddenCategoryIdsProvider);
     final settings = ref.watch(categorySettingsProvider);
+    final section = ref.watch(mainSectionProvider);
+
+    // Verificar si "Todos" tiene contenido
+    bool showTodos = true;
+    if (section == MainSection.vod) {
+      final vodAsync = ref.watch(vodStreamsProvider('__all__'));
+      showTodos = vodAsync.maybeWhen(
+        data: (v) => v.isNotEmpty,
+        orElse: () => false,
+      );
+    } else if (section == MainSection.series) {
+      final seriesAsync = ref.watch(seriesProvider('__all__'));
+      showTodos = seriesAsync.maybeWhen(
+        data: (s) => s.isNotEmpty,
+        orElse: () => false,
+      );
+    }
 
     final allCategories = [
-      XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
+      if (showTodos)
+        XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
       ...categories.where((c) => !hiddenIds.contains(c.categoryId)),
     ];
 
@@ -1088,58 +1102,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ── NAVEGACIÓN POR TECLADO ───────────────────────────
 
-  void _updateNavigationControllers() {
+  // Helper: obtener itemCount actual de los providers
+  int _getCurrentItemCount() {
+    final section = ref.read(mainSectionProvider);
+
+    if (section == MainSection.vod) {
+      final categoryId = _getSelectedCategoryId() ?? '__all__';
+      final vodAsync = ref.read(vodStreamsProvider(categoryId));
+      return vodAsync.maybeWhen(data: (v) => v.length, orElse: () => 0);
+    } else if (section == MainSection.series) {
+      final categoryId = _getSelectedCategoryId() ?? '__all__';
+      final seriesAsync = ref.read(seriesProvider(categoryId));
+      return seriesAsync.maybeWhen(data: (s) => s.length, orElse: () => 0);
+    } else if (section == MainSection.live) {
+      final categoryId = _getSelectedCategoryId() ?? '__all__';
+      final channelsAsync = ref.read(channelsProvider(categoryId));
+      return channelsAsync.maybeWhen(
+        data: (ch) {
+          final hiddenIds = ref.read(hiddenChannelIdsProvider);
+          return ch.where((c) => !hiddenIds.contains(c.streamId)).length;
+        },
+        orElse: () => 0,
+      );
+    } else if (section == MainSection.favorites) {
+      final favsAsync = ref.read(favoritesProvider);
+      return favsAsync.maybeWhen(data: (ch) => ch.length, orElse: () => 0);
+    }
+
+    return 0;
+  }
+
+  // Helper: navegar con controller on-demand
+  NavigationResult? _navigateWithController(Function(dynamic) navigate) {
     final section = ref.read(mainSectionProvider);
     final isGrid = section == MainSection.vod || section == MainSection.series;
+    final itemCount = _getCurrentItemCount();
+
+    if (itemCount == 0) return null;
 
     if (isGrid) {
-      // Grid sections (VOD, Series)
-      int itemCount = 0;
-      if (section == MainSection.vod) {
-        final categoryId = _getSelectedCategoryId() ?? '__all__';
-        final vodAsync = ref.read(vodStreamsProvider(categoryId));
-        itemCount = vodAsync.maybeWhen(data: (v) => v.length, orElse: () => 0);
-      } else if (section == MainSection.series) {
-        final categoryId = _getSelectedCategoryId() ?? '__all__';
-        final seriesAsync = ref.read(seriesProvider(categoryId));
-        itemCount = seriesAsync.maybeWhen(
-          data: (s) => s.length,
-          orElse: () => 0,
-        );
-      }
-
-      _gridController = GridNavigationController(
+      final controller = GridNavigationController(
         itemCount: itemCount,
         columnsPerRow: 5,
         initialIndex: _selectedContentIndex,
       );
-      _listController = null;
+      return navigate(controller);
     } else {
-      // List sections (Live TV, Favorites)
-      int itemCount = 0;
-      if (section == MainSection.live) {
-        final categoryId = _getSelectedCategoryId() ?? '__all__';
-        final channelsAsync = ref.read(channelsProvider(categoryId));
-        itemCount = channelsAsync.maybeWhen(
-          data: (ch) {
-            final hiddenIds = ref.read(hiddenChannelIdsProvider);
-            return ch.where((c) => !hiddenIds.contains(c.streamId)).length;
-          },
-          orElse: () => 0,
-        );
-      } else if (section == MainSection.favorites) {
-        final favsAsync = ref.read(favoritesProvider);
-        itemCount = favsAsync.maybeWhen(
-          data: (ch) => ch.length,
-          orElse: () => 0,
-        );
-      }
-
-      _listController = ListNavigationController(
+      final controller = ListNavigationController(
         itemCount: itemCount,
         initialIndex: _selectedContentIndex,
       );
-      _gridController = null;
+      return navigate(controller);
     }
   }
 
@@ -1188,44 +1201,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (event is! KeyDownEvent) return;
 
     if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-      if (_focusColumn == 2 && _gridController != null) {
-        // Grid: intentar mover a la izquierda
-        final result = _gridController!.navigateLeft();
-        if (result.success) {
-          setState(() {
-            _selectedContentIndex = result.newIndex;
+      if (_focusColumn == 2) {
+        // Contenido
+        final section = ref.read(mainSectionProvider);
+        final isGrid =
+            section == MainSection.vod || section == MainSection.series;
+
+        if (isGrid) {
+          // Grids: navegar dentro de la grilla primero
+          final result = _navigateWithController((controller) {
+            if (controller is GridNavigationController) {
+              return controller.navigateLeft();
+            }
+            return null;
           });
-          _scrollContentToSelected();
-        } else if (result.edge == NavigationEdge.left) {
-          // En el borde izquierdo: cambiar a categorías
+
+          if (result != null && result.success) {
+            setState(() {
+              _selectedContentIndex = result!.newIndex;
+            });
+            _scrollContentToSelected();
+          } else if (result != null && result.edge == NavigationEdge.left) {
+            // En el borde izquierdo: cambiar a categorías
+            setState(() => _focusColumn = 1);
+          } else if (result == null) {
+            // Grid vacío o sin controller: volver a categorías
+            setState(() => _focusColumn = 1);
+          }
+        } else {
+          // Listas: LEFT siempre vuelve a categorías
           setState(() => _focusColumn = 1);
         }
       } else if (_focusColumn > 0) {
         setState(() => _focusColumn--);
       }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-      if (_focusColumn == 2 && _gridController != null) {
-        // Grid: intentar mover a la derecha
-        final result = _gridController!.navigateRight();
-        if (result.success) {
-          setState(() {
-            _selectedContentIndex = result.newIndex;
+      if (_focusColumn == 2) {
+        // Contenido: solo grids tienen navegación horizontal
+        final section = ref.read(mainSectionProvider);
+        final isGrid =
+            section == MainSection.vod || section == MainSection.series;
+
+        if (isGrid) {
+          final result = _navigateWithController((controller) {
+            if (controller is GridNavigationController) {
+              return controller.navigateRight();
+            }
+            return null;
           });
-          _scrollContentToSelected();
+
+          if (result != null && result.success) {
+            setState(() {
+              _selectedContentIndex = result.newIndex;
+            });
+            _scrollContentToSelected();
+          }
         }
-        // Si falla (borde derecho), no hacer nada (quedarse en el lugar)
       } else if (_focusColumn < 2) {
         setState(() => _focusColumn++);
       }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
       if (_focusColumn == 2) {
-        // Contenido: usar controllers
-        NavigationResult? result;
-        if (_gridController != null) {
-          result = _gridController!.navigateUp();
-        } else if (_listController != null) {
-          result = _listController!.navigateUp();
-        }
+        // Contenido: navegar con controller on-demand
+        final result = _navigateWithController((controller) {
+          if (controller is GridNavigationController) {
+            return controller.navigateUp();
+          } else if (controller is ListNavigationController) {
+            return controller.navigateUp();
+          }
+          return null;
+        });
 
         if (result != null && result.success) {
           setState(() {
@@ -1247,12 +1292,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       if (_focusColumn == 2) {
-        // Contenido: usar controllers
+        // Contenido: crear controller on-demand con datos actuales
+        final section = ref.read(mainSectionProvider);
+        final isGrid =
+            section == MainSection.vod || section == MainSection.series;
+
         NavigationResult? result;
-        if (_gridController != null) {
-          result = _gridController!.navigateDown();
-        } else if (_listController != null) {
-          result = _listController!.navigateDown();
+
+        if (isGrid) {
+          // Crear grid controller on-demand
+          int itemCount = 0;
+          if (section == MainSection.vod) {
+            final categoryId = _getSelectedCategoryId() ?? '__all__';
+            final vodAsync = ref.read(vodStreamsProvider(categoryId));
+            itemCount = vodAsync.maybeWhen(
+              data: (v) => v.length,
+              orElse: () => 0,
+            );
+          } else if (section == MainSection.series) {
+            final categoryId = _getSelectedCategoryId() ?? '__all__';
+            final seriesAsync = ref.read(seriesProvider(categoryId));
+            itemCount = seriesAsync.maybeWhen(
+              data: (s) => s.length,
+              orElse: () => 0,
+            );
+          }
+
+          if (itemCount > 0) {
+            final controller = GridNavigationController(
+              itemCount: itemCount,
+              columnsPerRow: 5,
+              initialIndex: _selectedContentIndex,
+            );
+            result = controller.navigateDown();
+          }
+        } else {
+          // Crear list controller on-demand
+          int itemCount = 0;
+          if (section == MainSection.live) {
+            final categoryId = _getSelectedCategoryId() ?? '__all__';
+            final channelsAsync = ref.read(channelsProvider(categoryId));
+            itemCount = channelsAsync.maybeWhen(
+              data: (ch) {
+                final hiddenIds = ref.read(hiddenChannelIdsProvider);
+                return ch.where((c) => !hiddenIds.contains(c.streamId)).length;
+              },
+              orElse: () => 0,
+            );
+          } else if (section == MainSection.favorites) {
+            final favsAsync = ref.read(favoritesProvider);
+            itemCount = favsAsync.maybeWhen(
+              data: (ch) => ch.length,
+              orElse: () => 0,
+            );
+          }
+
+          if (itemCount > 0) {
+            final controller = ListNavigationController(
+              itemCount: itemCount,
+              initialIndex: _selectedContentIndex,
+            );
+            result = controller.navigateDown();
+          }
         }
 
         if (result != null && result.success) {
@@ -1367,13 +1468,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _selectedContentIndex = 0;
         _focusColumn = 1;
       });
-      _updateNavigationControllers();
     } else if (_focusColumn == 1) {
       setState(() {
         _focusColumn = 2;
         _selectedContentIndex = 0;
       });
-      _updateNavigationControllers();
     } else if (_focusColumn == 2) {
       // Abrir el contenido seleccionado
       _openSelectedContent();
