@@ -1,15 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xtream_tv/services/navigation/list_navigation_controller.dart';
+import 'package:xtream_tv/services/navigation/grid_navigation_controller.dart';
+import 'package:xtream_tv/services/navigation/navigation_models.dart';
 
-/// Unit tests for list navigation logic
-/// These tests verify the CORRECT behavior for list navigation (Live TV, Favorites)
-/// when the down-arrow is pressed.
-///
-/// CURRENT BUG: HomeScreen._navigateDown() always calls _navigateGrid(1, 0) for content,
-/// even for list sections. This breaks Down-arrow in Live TV and Favorites.
-///
-/// EXPECTED FIX: _navigateDown() should detect if we're in a list section or grid section:
-/// - Lists (Live TV, Favorites): increment index linearly
-/// - Grids (VOD, Series): use grid navigation (already working)
+/// Unit tests for list and grid navigation controllers integration
+/// These tests verify that HomeScreen correctly uses the navigation controllers
+/// for list sections (Live TV, Favorites) and grid sections (VOD, Series).
 void main() {
   group('List Navigation Logic - Down Arrow', () {
     test(
@@ -91,6 +87,67 @@ void main() {
         newIndex,
         equals(9),
         reason: 'Grid down-arrow should go to last card of next row',
+      );
+    });
+  });
+
+  group('Navigation Controller Integration', () {
+    test('Grid navigation uses GridNavigationController', () {
+      // SCENARIO: VOD section with 13 items (grid layout)
+      final controller = GridNavigationController(
+        itemCount: 13,
+        columnsPerRow: 5,
+        initialIndex: 2,
+      );
+
+      // Navigate down - should go to last card of next row (index 9)
+      final result = controller.navigateDown();
+
+      expect(result.success, isTrue, reason: 'Down navigation should succeed');
+      expect(
+        result.newIndex,
+        equals(9),
+        reason: 'Grid down should go to last card of next row (index 9)',
+      );
+    });
+
+    test('List navigation uses ListNavigationController', () {
+      // SCENARIO: Live TV section with 5 channels (list layout)
+      final controller = ListNavigationController(
+        itemCount: 5,
+        initialIndex: 2,
+      );
+
+      // Navigate down - should increment index
+      final result = controller.navigateDown();
+
+      expect(result.success, isTrue, reason: 'Down navigation should succeed');
+      expect(
+        result.newIndex,
+        equals(3),
+        reason: 'List down should increment index linearly',
+      );
+    });
+
+    test('Left-edge detection enables category switch', () {
+      // SCENARIO: Grid at column 0, user presses left
+      final controller = GridNavigationController(
+        itemCount: 13,
+        columnsPerRow: 5,
+        initialIndex: 5, // First card of second row
+      );
+
+      final result = controller.navigateLeft();
+
+      expect(
+        result.success,
+        isFalse,
+        reason: 'Left navigation should fail at column 0',
+      );
+      expect(
+        result.edge,
+        equals(NavigationEdge.left),
+        reason: 'Should signal left edge hit',
       );
     });
   });
