@@ -241,5 +241,53 @@ void main() {
       expect(result.newIndex, equals(1));
       expect(controller.selectedIndex, equals(1));
     });
+
+    test(
+      'navigateUp from incomplete row where target column does not exist',
+      () {
+        final controller = GridNavigationController(
+          itemCount: 13, // Row 0: 5, Row 1: 5, Row 2: 3 items
+          columnsPerRow: 5,
+          initialIndex: 12, // Row 2, col 2 (last item)
+        );
+        final result = controller.navigateUp();
+
+        // Row 1 has 5 items, col 2 exists at index 7 (row 1, col 2)
+        expect(result.success, isTrue);
+        expect(result.newIndex, equals(7));
+        expect(controller.selectedIndex, equals(7));
+      },
+    );
+
+    test(
+      'navigateUp to incomplete row where current column exceeds row length',
+      () {
+        final controller = GridNavigationController(
+          itemCount: 8, // Row 0: 5, Row 1: 3 items
+          columnsPerRow: 5,
+          initialIndex:
+              9, // Would be row 1, col 4 if it existed (but itemCount=8)
+        );
+
+        // Start at index 7 (row 1, col 2 - last item) instead
+        final controller2 = GridNavigationController(
+          itemCount: 13, // Row 0: 5, Row 1: 5, Row 2: 3
+          columnsPerRow: 5,
+          initialIndex: 14, // Would be row 2, col 4, but itemCount=13
+        );
+
+        // Actually test from a valid incomplete position
+        final controller3 = GridNavigationController(
+          itemCount: 9, // Row 0: 5, Row 1: 4
+          columnsPerRow: 5,
+          initialIndex: 8, // Row 1, col 3 (last item)
+        );
+        final result = controller3.navigateUp();
+
+        // Row 0 col 3 exists at index 3
+        expect(result.success, isTrue);
+        expect(result.newIndex, equals(3));
+      },
+    );
   });
 }

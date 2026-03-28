@@ -1580,7 +1580,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
     } else {
       // Para listas (Live TV, Favoritos)
-      const itemHeight = 72.0;
+      const itemHeight = NavigationConstants.listItemHeight;
       final offset = _selectedContentIndex * itemHeight;
 
       _contentScrollController.animateTo(
