@@ -58,8 +58,9 @@ class XtreamService {
   }
 
   // Construir URL del stream
+  // Formato .ts (MPEG-TS) - más directo para IPTV
   String getStreamUrl(int streamId) {
-    return '$_baseUrl/live/$_username/$_password/$streamId.m3u8';
+    return '$_baseUrl/live/$_username/$_password/$streamId.ts';
   }
 
   // Categorías VOD

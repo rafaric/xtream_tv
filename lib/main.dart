@@ -3,12 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
-import 'package:media_kit/media_kit.dart';
+// import 'package:media_kit/media_kit.dart';
 import 'providers/xtream_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  // MediaKit.ensureInitialized();
 
   final prefs = await SharedPreferences.getInstance();
 

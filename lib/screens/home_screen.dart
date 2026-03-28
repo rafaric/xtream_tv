@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import '../providers/xtream_provider.dart';
 import '../models/channel.dart';
 import '../services/category_settings_service.dart';
@@ -12,7 +10,8 @@ import 'player_screen.dart';
 import 'vod_detail_screen.dart';
 import 'series_detail_screen.dart';
 import 'groups_screen.dart';
-import '../widgets/channel_preview.dart';
+// Preview temporalmente deshabilitado durante migración
+// import '../widgets/channel_preview.dart';
 import 'dart:async';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -31,8 +30,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   XtreamChannel? _previewChannel;
   EpgProgram? _previewProgram;
   Timer? _previewTimer;
-  Player? _previewPlayer;
-  VideoController? _previewController;
+  // Preview temporalmente deshabilitado
+  // VlcPlayerController? _previewController;
   bool _playerScreenOpen = false;
 
   // Long press detection para context menu
@@ -544,14 +543,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ) {
     return Column(
       children: [
-        // Preview del canal seleccionado
-        if (_previewChannel != null && _previewController != null)
-          ChannelPreview(
-            key: ValueKey(_previewChannel!.streamId),
-            channel: _previewChannel!,
-            controller: _previewController!,
-            currentProgram: _previewProgram,
-          ),
+        // Preview temporalmente deshabilitado durante migración a BetterPlayer
+        // TODO: Reimplementar preview con BetterPlayer
 
         // Lista de canales
         Expanded(
@@ -1754,20 +1747,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     XtreamChannel channel,
     Map<String, EpgProgram?> epgMap,
   ) {
+    // Preview temporalmente deshabilitado durante migración
+    // TODO: Reimplementar con BetterPlayer
     _previewTimer?.cancel();
-    _previewTimer = Timer(const Duration(seconds: 2), () {
+    _previewTimer = Timer(const Duration(seconds: 2), () async {
       if (!mounted) return;
-      final service = ref.read(xtreamServiceProvider);
-      final url = service.getStreamUrl(channel.streamId);
       final program = _findEpgForChannel(channel.name, epgMap);
-      // Dispose previous preview player and create a new one
-      _previewPlayer?.dispose();
-      final player = Player();
-      final controller = VideoController(player);
-      player.open(Media(url));
       setState(() {
-        _previewPlayer = player;
-        _previewController = controller;
         _previewChannel = channel;
         _previewProgram = program;
       });
@@ -1777,9 +1763,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ignore: unused_element
   void _clearPreview() {
     _previewTimer?.cancel();
-    _previewPlayer?.dispose();
-    _previewPlayer = null;
-    _previewController = null;
     setState(() {
       _previewChannel = null;
       _previewProgram = null;
@@ -1815,22 +1798,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       orElse: () => <XtreamChannel>[],
     );
 
-    // Reusar el preview player si es el mismo canal, o crear uno nuevo
-    Player? existingPlayer;
-    VideoController? existingController;
-    if (_previewChannel?.streamId == channel.streamId &&
-        _previewPlayer != null) {
-      existingPlayer = _previewPlayer;
-      existingController = _previewController;
-    } else {
-      // Descartar preview de otro canal
-      _previewPlayer?.dispose();
-    }
-
-    // Limpiar preview sin dispose (PlayerScreen toma ownership)
+    // Limpiar preview antes de abrir PlayerScreen
     _previewTimer?.cancel();
-    _previewPlayer = null;
-    _previewController = null;
     _playerScreenOpen = true;
     setState(() {
       _previewChannel = null;
@@ -1845,8 +1814,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               streamUrl: service.getStreamUrl(channel.streamId),
               categoryChannels: categoryChannels,
               epgMap: epgMap,
-              player: existingPlayer,
-              controller: existingController,
             ),
           ),
         )
@@ -1977,7 +1944,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _contentScrollController.dispose();
     _previewTimer?.cancel();
     _longPressTimer?.cancel();
-    _previewPlayer?.dispose();
     super.dispose();
   }
 }
