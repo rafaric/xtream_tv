@@ -15,7 +15,22 @@ class VodDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
+  final FocusNode _keyboardFocusNode = FocusNode();
   int _focusedButtonIndex = 1; // 0=Volver, 1=Reproducir (default)
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _keyboardFocusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _keyboardFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +40,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
       body: KeyboardListener(
-        focusNode: FocusNode()..requestFocus(),
+        focusNode: _keyboardFocusNode,
         onKeyEvent: (event) {
           if (event is! KeyDownEvent) return;
 
@@ -68,7 +83,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      const Color(0xFF0D0D1A).withOpacity(0.6),
+                      const Color(0xFF0D0D1A).withValues(alpha: 0.6),
                       const Color(0xFF0D0D1A),
                     ],
                   ),
@@ -301,7 +316,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
       duration: const Duration(milliseconds: 150),
       decoration: BoxDecoration(
         color: isFocused
-            ? Colors.deepPurple.withOpacity(0.3)
+            ? Colors.deepPurple.withValues(alpha: 0.3)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
@@ -334,7 +349,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
           boxShadow: isFocused
               ? [
                   BoxShadow(
-                    color: Colors.deepPurple.withOpacity(0.7),
+                    color: Colors.deepPurple.withValues(alpha: 0.7),
                     blurRadius: 12,
                   ),
                 ]
@@ -349,6 +364,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
           ),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.deepPurple,
+            foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
               side: BorderSide(
