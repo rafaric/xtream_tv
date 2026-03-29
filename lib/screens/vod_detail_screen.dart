@@ -5,14 +5,22 @@ import '../models/channel.dart';
 import '../providers/xtream_provider.dart';
 import 'player_screen.dart';
 
-class VodDetailScreen extends ConsumerWidget {
+class VodDetailScreen extends ConsumerStatefulWidget {
   final VodStream vod;
 
   const VodDetailScreen({super.key, required this.vod});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<VodDetailScreen> createState() => _VodDetailScreenState();
+}
+
+class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
+  int _focusedButtonIndex = 1; // 0=Volver, 1=Reproducir (default)
+
+  @override
+  Widget build(BuildContext context) {
     final service = ref.read(xtreamServiceProvider);
+    final vod = widget.vod;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
@@ -20,9 +28,21 @@ class VodDetailScreen extends ConsumerWidget {
         focusNode: FocusNode()..requestFocus(),
         onKeyEvent: (event) {
           if (event is! KeyDownEvent) return;
+
           if (event.logicalKey == LogicalKeyboardKey.goBack ||
               event.logicalKey == LogicalKeyboardKey.escape) {
             Navigator.of(context).pop();
+          } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            setState(() {
+              if (_focusedButtonIndex > 0) _focusedButtonIndex--;
+            });
+          } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            setState(() {
+              if (_focusedButtonIndex < 1) _focusedButtonIndex++;
+            });
+          } else if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter) {
+            _handleSelect();
           }
         },
         child: Stack(
@@ -48,7 +68,7 @@ class VodDetailScreen extends ConsumerWidget {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      const Color(0xFF0D0D1A).withValues(alpha: 0.6),
+                      const Color(0xFF0D0D1A).withOpacity(0.6),
                       const Color(0xFF0D0D1A),
                     ],
                   ),
@@ -86,17 +106,11 @@ class VodDetailScreen extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Botón volver
-                          TextButton.icon(
+                          _buildNavButton(
+                            text: 'Volver',
+                            icon: Icons.arrow_back,
+                            isFocused: _focusedButtonIndex == 0,
                             onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(
-                              Icons.arrow_back,
-                              color: Colors.white54,
-                            ),
-                            label: const Text(
-                              'Volver',
-                              style: TextStyle(color: Colors.white54),
-                            ),
                           ),
                           const SizedBox(height: 16),
 
@@ -166,45 +180,28 @@ class VodDetailScreen extends ConsumerWidget {
                           const Spacer(),
 
                           // Botón reproducir
-                          SizedBox(
-                            width: 200,
-                            height: 52,
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                final url = service.getVodUrl(
-                                  vod.streamId,
-                                  vod.containerExtension,
-                                );
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => PlayerScreen(
-                                      channel: XtreamChannel(
-                                        streamId: vod.streamId,
-                                        name: vod.name,
-                                        streamIcon: vod.streamIcon,
-                                        categoryId: vod.categoryId,
-                                        streamType: 'movie',
-                                      ),
-                                      streamUrl: url,
+                          _buildPlayButton(
+                            isFocused: _focusedButtonIndex == 1,
+                            onPressed: () {
+                              final url = service.getVodUrl(
+                                vod.streamId,
+                                vod.containerExtension,
+                              );
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => PlayerScreen(
+                                    channel: XtreamChannel(
+                                      streamId: vod.streamId,
+                                      name: vod.name,
+                                      streamIcon: vod.streamIcon,
+                                      categoryId: vod.categoryId,
+                                      streamType: 'movie',
                                     ),
+                                    streamUrl: url,
                                   ),
-                                );
-                              },
-                              icon: const Icon(Icons.play_arrow, size: 28),
-                              label: const Text(
-                                'Reproducir',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
                                 ),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.deepPurple,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                            ),
+                              );
+                            },
                           ),
                         ],
                       ),
@@ -264,6 +261,103 @@ class VodDetailScreen extends ConsumerWidget {
         ),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+
+  void _handleSelect() {
+    if (_focusedButtonIndex == 0) {
+      // Volver
+      Navigator.of(context).pop();
+    } else if (_focusedButtonIndex == 1) {
+      // Reproducir
+      final service = ref.read(xtreamServiceProvider);
+      final vod = widget.vod;
+      final url = service.getVodUrl(vod.streamId, vod.containerExtension);
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+            channel: XtreamChannel(
+              streamId: vod.streamId,
+              name: vod.name,
+              streamIcon: vod.streamIcon,
+              categoryId: vod.categoryId,
+              streamType: 'movie',
+            ),
+            streamUrl: url,
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildNavButton({
+    required String text,
+    required IconData icon,
+    required bool isFocused,
+    required VoidCallback onPressed,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        color: isFocused
+            ? Colors.deepPurple.withOpacity(0.3)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isFocused ? Colors.deepPurpleAccent : Colors.transparent,
+          width: 1,
+        ),
+      ),
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, color: isFocused ? Colors.white : Colors.white54),
+        label: Text(
+          text,
+          style: TextStyle(color: isFocused ? Colors.white : Colors.white54),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayButton({
+    required bool isFocused,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: 200,
+      height: 52,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: isFocused
+              ? [
+                  BoxShadow(
+                    color: Colors.deepPurple.withOpacity(0.7),
+                    blurRadius: 12,
+                  ),
+                ]
+              : [],
+        ),
+        child: ElevatedButton.icon(
+          onPressed: onPressed,
+          icon: const Icon(Icons.play_arrow, size: 28),
+          label: const Text(
+            'Reproducir',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.deepPurple,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(
+                color: isFocused ? Colors.deepPurpleAccent : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

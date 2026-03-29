@@ -1999,71 +1999,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
-  void _openLivePlayer(XtreamChannel channel) {
+  void _openLivePlayer(XtreamChannel channel) async {
+    setState(() => _playerScreenOpen = true);
     final service = ref.read(xtreamServiceProvider);
-    final epgMap = ref
-        .read(epgMapProvider)
-        .maybeWhen(data: (map) => map, orElse: () => <String, EpgProgram?>{});
+    final url = service.getStreamUrl(channel.streamId);
 
-    // Obtener canales de la categoría actual
-    final categoriesAsync = ref.read(categoriesProvider);
-    final categories = categoriesAsync.maybeWhen(
-      data: (cats) => cats,
-      orElse: () => <XtreamCategory>[],
-    );
-    final allCategories = [
-      XtreamCategory(categoryId: '__all__', categoryName: 'Todos'),
-      ...categories,
-    ];
-    final selectedCategory = _selectedCategoryIndex < allCategories.length
-        ? allCategories[_selectedCategoryIndex]
-        : null;
-    final categoryId = selectedCategory?.categoryId == '__all__'
-        ? null
-        : selectedCategory?.categoryId;
-
-    final channelsAsync = ref.read(channelsProvider(categoryId ?? '__all__'));
-    final categoryChannels = channelsAsync.maybeWhen(
-      data: (ch) => ch,
-      orElse: () => <XtreamChannel>[],
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(channel: channel, streamUrl: url),
+      ),
     );
 
-    // Limpiar preview antes de abrir PlayerScreen
-    _previewTimer?.cancel();
-    _playerScreenOpen = true;
-    setState(() {
-      _previewChannel = null;
-      _previewProgram = null;
-    });
-
-    Navigator.of(context)
-        .push(
-          MaterialPageRoute(
-            builder: (_) => PlayerScreen(
-              channel: channel,
-              streamUrl: service.getStreamUrl(channel.streamId),
-              categoryChannels: categoryChannels,
-              epgMap: epgMap,
-            ),
-          ),
-        )
-        .then((_) => _playerScreenOpen = false);
+    // Cuando vuelve del player
+    if (mounted) {
+      setState(() {
+        _playerScreenOpen = false;
+        _focusColumn = 1; // Devolver foco a las categorías
+      });
+    }
   }
 
-  void _openVodDetail(VodStream vod) {
-    _detailScreenOpen = true;
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => VodDetailScreen(vod: vod)))
-        .then((_) => _detailScreenOpen = false);
+  void _openVodDetail(VodStream vod) async {
+    setState(() => _detailScreenOpen = true);
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => VodDetailScreen(vod: vod)));
+    if (mounted) {
+      setState(() {
+        _detailScreenOpen = false;
+        _focusColumn = 1; // Devolver foco a las categorías
+      });
+    }
   }
 
-  void _openSeriesDetail(Series series) {
-    _detailScreenOpen = true;
-    Navigator.of(context)
-        .push(
-          MaterialPageRoute(builder: (_) => SeriesDetailScreen(series: series)),
-        )
-        .then((_) => _detailScreenOpen = false);
+  void _openSeriesDetail(Series series) async {
+    setState(() => _detailScreenOpen = true);
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SeriesDetailScreen(series: series)),
+    );
+    if (mounted) {
+      setState(() {
+        _detailScreenOpen = false;
+        _focusColumn = 1; // Devolver foco a las categorías
+      });
+    }
   }
 
   Future<void> _toggleFavorite(XtreamChannel channel, bool isFav) async {

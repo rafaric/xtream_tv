@@ -173,10 +173,11 @@ class GridNavigationController {
     return NavigationResult(newIndex: _selectedIndex, success: true);
   }
 
-  /// Navigate down (move to the row below, landing on the LAST card)
+  /// Navigate down (move to the row below, preserving column position)
   ///
-  /// **User Requirement**: Down arrow always goes to the LAST card of the next row,
-  /// NOT the same column. This differs from traditional grid navigation.
+  /// Moves to the same column position in the row below.
+  /// If the target column doesn't exist (e.g., last row is incomplete),
+  /// goes to the last card available in the target row.
   ///
   /// At the last row, returns [NavigationEdge.bottom] without changing index.
   ///
@@ -185,7 +186,8 @@ class GridNavigationController {
   /// Row 0: [0] [1] [2] [3] [4]
   /// Row 1: [5] [6] [7]        ← last row is incomplete
   /// ```
-  /// - From index 1 (anywhere in row 0), DOWN → index 7 (last card of row 1)
+  /// - From index 1 (column 1), DOWN → index 6 (column 1 exists in row 1)
+  /// - From index 3 (column 3), DOWN → index 7 (column 3 doesn't exist, go to last)
   /// - From index 7 (bottom row), DOWN → stays at 7 (edge detected, returns false)
   NavigationResult navigateDown() {
     if (itemCount == 0) {
@@ -205,9 +207,10 @@ class GridNavigationController {
     }
 
     final currentRow = _selectedIndex ~/ columnsPerRow;
+    final currentCol = _selectedIndex % columnsPerRow;
     final targetRow = currentRow + 1;
 
-    // Calculate last card in target row
+    // Calculate target index at same column in next row
     final targetRowFirstCard = targetRow * columnsPerRow;
     if (targetRowFirstCard >= itemCount) {
       // No next row exists
@@ -218,6 +221,16 @@ class GridNavigationController {
       );
     }
 
+    final targetIndex = targetRow * columnsPerRow + currentCol;
+
+    // Check if target index exists at same column
+    if (targetIndex < itemCount) {
+      // Card exists at same column in target row
+      _selectedIndex = targetIndex;
+      return NavigationResult(newIndex: _selectedIndex, success: true);
+    }
+
+    // Card doesn't exist: go to last card of target row
     final targetRowLastCard = min(
       (targetRow + 1) * columnsPerRow - 1,
       itemCount - 1,

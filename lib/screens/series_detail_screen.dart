@@ -15,8 +15,15 @@ class SeriesDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
+  final ScrollController _episodesScrollController = ScrollController();
+  final Map<int, GlobalKey> _episodeKeys = {};
+
   String _selectedSeason = '';
+  int _seasonFocusIndex = 0;
   int _selectedEpisodeIndex = 0;
+
+  // 0=Volver, 1=Temporadas, 2=Episodios
+  int _focusColumn = 1; // Default focus en las temporadas
 
   @override
   Widget build(BuildContext context) {
@@ -30,9 +37,60 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
         focusNode: FocusNode()..requestFocus(),
         onKeyEvent: (event) {
           if (event is! KeyDownEvent) return;
+
           if (event.logicalKey == LogicalKeyboardKey.goBack ||
               event.logicalKey == LogicalKeyboardKey.escape) {
             Navigator.of(context).pop();
+            return;
+          }
+
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            setState(() {
+              if (_focusColumn == 2) {
+                if (_selectedEpisodeIndex > 0) {
+                  _selectedEpisodeIndex--;
+                  _scrollEpisodeToSelected();
+                } else {
+                  _focusColumn = 1; // Volver a las temporadas
+                }
+              } else if (_focusColumn > 0) {
+                _focusColumn--;
+              }
+            });
+          } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            final episodes = _getCurrentEpisodes();
+            setState(() {
+              if (_focusColumn == 2) {
+                if (_selectedEpisodeIndex < episodes.length - 1) {
+                  _selectedEpisodeIndex++;
+                  _scrollEpisodeToSelected();
+                }
+              } else if (_focusColumn < 2) {
+                _focusColumn++;
+              }
+            });
+          } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            if (_focusColumn == 1 && _seasonFocusIndex > 0) {
+              setState(() {
+                _seasonFocusIndex--;
+                _episodeKeys.clear();
+                _selectedEpisodeIndex = 0;
+              });
+            }
+          } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            if (_focusColumn == 1) {
+              final seasons = _getCurrentSeasons();
+              if (_seasonFocusIndex < seasons.length - 1) {
+                setState(() {
+                  _seasonFocusIndex++;
+                  _episodeKeys.clear();
+                  _selectedEpisodeIndex = 0;
+                });
+              }
+            }
+          } else if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter) {
+            _handleSelect();
           }
         },
         child: Stack(
@@ -94,17 +152,11 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Volver
-                          TextButton.icon(
+                          _buildNavButton(
+                            text: 'Volver',
+                            icon: Icons.arrow_back,
+                            isFocused: _focusColumn == 0,
                             onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(
-                              Icons.arrow_back,
-                              color: Colors.white54,
-                            ),
-                            label: const Text(
-                              'Volver',
-                              style: TextStyle(color: Colors.white54),
-                            ),
                           ),
                           const SizedBox(height: 8),
 
@@ -189,12 +241,18 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
       );
     }
 
-    // Inicializar temporada seleccionada
-    if (_selectedSeason.isEmpty) {
-      _selectedSeason = seasons.keys.first;
+    final seasonKeys = _getCurrentSeasons();
+    if (_seasonFocusIndex >= seasonKeys.length) {
+      _seasonFocusIndex = seasonKeys.isNotEmpty ? seasonKeys.length - 1 : 0;
+    }
+    if (seasonKeys.isNotEmpty) {
+      _selectedSeason = seasonKeys[_seasonFocusIndex];
     }
 
-    final episodes = seasons[_selectedSeason] ?? [];
+    final episodes = _getCurrentEpisodes();
+    if (_selectedEpisodeIndex >= episodes.length) {
+      _selectedEpisodeIndex = episodes.isNotEmpty ? episodes.length - 1 : 0;
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -214,12 +272,16 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
           height: 36,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            children: seasons.keys.map((season) {
-              final isSelected = season == _selectedSeason;
+            children: seasonKeys.asMap().entries.map((entry) {
+              final index = entry.key;
+              final season = entry.value;
+              final isFocused = _focusColumn == 1 && index == _seasonFocusIndex;
               return GestureDetector(
                 onTap: () => setState(() {
-                  _selectedSeason = season;
+                  _seasonFocusIndex = index;
                   _selectedEpisodeIndex = 0;
+                  _episodeKeys.clear();
+                  _focusColumn = 1;
                 }),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
@@ -229,21 +291,22 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: isSelected
+                    color: isFocused
                         ? Colors.deepPurple
                         : const Color(0xFF1A1A2E),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isSelected
+                      color: isFocused
                           ? Colors.deepPurpleAccent
                           : Colors.deepPurple.withValues(alpha: 0.3),
+                      width: isFocused ? 2 : 1,
                     ),
                   ),
                   child: Text(
                     'T$season',
                     style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.white54,
-                      fontWeight: isSelected
+                      color: isFocused ? Colors.white : Colors.white54,
+                      fontWeight: isFocused
                           ? FontWeight.bold
                           : FontWeight.normal,
                       fontSize: 13,
@@ -268,101 +331,160 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
         ),
         const SizedBox(height: 8),
         Expanded(
-          child: ListView.builder(
-            itemCount: episodes.length,
-            itemBuilder: (context, index) {
-              final ep = episodes[index];
-              final isSelected = index == _selectedEpisodeIndex;
-              return GestureDetector(
-                onTap: () => _playEpisode(ep),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
+          child: episodes.isEmpty
+              ? const Center(
+                  child: Text(
+                    "No hay episodios en esta temporada.",
+                    style: TextStyle(color: Colors.white38),
                   ),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Colors.deepPurple
-                        : const Color(0xFF1A1A2E),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isSelected
-                          ? Colors.deepPurpleAccent
-                          : Colors.deepPurple.withValues(alpha: 0.2),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: Colors.deepPurple.withValues(alpha: 0.3),
-                          borderRadius: BorderRadius.circular(6),
+                )
+              : ListView.builder(
+                  controller: _episodesScrollController,
+                  itemCount: episodes.length,
+                  itemBuilder: (context, index) {
+                    _episodeKeys.putIfAbsent(index, () => GlobalKey());
+                    final ep = episodes[index];
+                    final isFocused =
+                        _focusColumn == 2 && index == _selectedEpisodeIndex;
+                    return GestureDetector(
+                      key: _episodeKeys[index],
+                      onTap: () => _playEpisode(ep),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
                         ),
-                        child: Center(
-                          child: Text(
-                            '${ep.episodeNum}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
+                        decoration: BoxDecoration(
+                          color: isFocused
+                              ? Colors.deepPurple
+                              : const Color(0xFF1A1A2E),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isFocused
+                                ? Colors.deepPurpleAccent
+                                : Colors.deepPurple.withValues(alpha: 0.2),
+                            width: isFocused ? 2 : 1,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Row(
                           children: [
-                            Text(
-                              ep.title,
-                              style: TextStyle(
-                                color: isSelected
-                                    ? Colors.white
-                                    : Colors.white70,
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                fontSize: 13,
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: Colors.deepPurple.withValues(alpha: 0.3),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${ep.episodeNum}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ),
                             ),
-                            if (ep.plot.isNotEmpty)
-                              Text(
-                                ep.plot,
-                                style: const TextStyle(
-                                  color: Colors.white38,
-                                  fontSize: 11,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    ep.title,
+                                    style: TextStyle(
+                                      color: isFocused
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontWeight: isFocused
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  if (ep.plot.isNotEmpty)
+                                    Text(
+                                      ep.plot,
+                                      style: const TextStyle(
+                                        color: Colors.white38,
+                                        fontSize: 11,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (isFocused)
+                              const Icon(
+                                Icons.play_circle_outline,
+                                color: Colors.deepPurpleAccent,
+                                size: 24,
                               ),
                           ],
                         ),
                       ),
-                      const Icon(
-                        Icons.play_circle_outline,
-                        color: Colors.deepPurpleAccent,
-                        size: 24,
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
         ),
       ],
     );
   }
 
+  void _handleSelect() {
+    if (_focusColumn == 0) {
+      Navigator.of(context).pop();
+    } else if (_focusColumn == 1) {
+      setState(() => _focusColumn = 2);
+    } else if (_focusColumn == 2) {
+      final episodes = _getCurrentEpisodes();
+      if (_selectedEpisodeIndex < episodes.length) {
+        _playEpisode(episodes[_selectedEpisodeIndex]);
+      }
+    }
+  }
+
+  List<String> _getCurrentSeasons() {
+    final episodesAsync = ref.read(
+      seriesEpisodesProvider(widget.series.seriesId),
+    );
+    return episodesAsync.maybeWhen(
+      data: (s) => s.keys.toList(),
+      orElse: () => [],
+    );
+  }
+
+  List<SeriesEpisode> _getCurrentEpisodes() {
+    final episodesAsync = ref.read(
+      seriesEpisodesProvider(widget.series.seriesId),
+    );
+    final seasons = episodesAsync.maybeWhen(data: (s) => s, orElse: () => {});
+    return seasons[_selectedSeason] ?? [];
+  }
+
+  void _scrollEpisodeToSelected() {
+    final key = _episodeKeys[_selectedEpisodeIndex];
+    if (key == null) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = key.currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(
+          context,
+          duration: const Duration(milliseconds: 200),
+          alignment: 0.5, // Centrar
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   void _playEpisode(SeriesEpisode episode) {
     final service = ref.read(xtreamServiceProvider);
-
-    // Usar direct_source si está disponible, sino construir la URL
     final url = episode.directSource.isNotEmpty
         ? episode.directSource
         : service.getEpisodeUrl(episode.id, episode.containerExtension);
@@ -408,6 +530,35 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
           style: TextStyle(color: color ?? Colors.white54, fontSize: 13),
         ),
       ],
+    );
+  }
+
+  Widget _buildNavButton({
+    required String text,
+    required IconData icon,
+    required bool isFocused,
+    required VoidCallback onPressed,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        color: isFocused
+            ? Colors.deepPurple.withValues(alpha: 0.3)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isFocused ? Colors.deepPurpleAccent : Colors.transparent,
+          width: 1,
+        ),
+      ),
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, color: isFocused ? Colors.white : Colors.white54),
+        label: Text(
+          text,
+          style: TextStyle(color: isFocused ? Colors.white : Colors.white54),
+        ),
+      ),
     );
   }
 }

@@ -43,7 +43,14 @@ final vodStreamsProvider = FutureProvider.family<List<VodStream>, String>((
   ref,
   categoryId,
 ) async {
-  return ref.read(xtreamServiceProvider).getVodStreams(categoryId: categoryId);
+  print('📦 PROVIDER: vodStreamsProvider called with categoryId: $categoryId');
+  final result = await ref
+      .read(xtreamServiceProvider)
+      .getVodStreams(categoryId: categoryId);
+  print(
+    '📦 PROVIDER: vodStreamsProvider returning ${result.length} items for categoryId: $categoryId',
+  );
+  return result;
 });
 
 // ── SERIES ───────────────────────────────────────────

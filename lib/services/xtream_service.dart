@@ -46,7 +46,8 @@ class XtreamService {
   Future<List<XtreamChannel>> getChannels({String? categoryId}) async {
     try {
       String url = '$_apiBase&action=get_live_streams';
-      if (categoryId != null) {
+      // '__all__' significa "todos", no agregar category_id al URL
+      if (categoryId != null && categoryId != '__all__') {
         url += '&category_id=$categoryId';
       }
       final response = await _dio.get(url);
@@ -66,10 +67,17 @@ class XtreamService {
   // Categorías VOD
   Future<List<XtreamCategory>> getVodCategories() async {
     try {
-      final response = await _dio.get('$_apiBase&action=get_vod_categories');
+      String url = '$_apiBase&action=get_vod_categories';
+      print('📁 VOD CATEGORIES REQUEST: $url');
+      final response = await _dio.get(url);
       final List data = response.data;
+      print('📁 VOD CATEGORIES RESPONSE: ${data.length} categories');
+      for (var cat in data) {
+        print('   - ${cat['category_name']} (ID: ${cat['category_id']})');
+      }
       return data.map((e) => XtreamCategory.fromJson(e)).toList();
     } catch (e) {
+      print('📁 VOD CATEGORIES ERROR: $e');
       return [];
     }
   }
@@ -78,11 +86,39 @@ class XtreamService {
   Future<List<VodStream>> getVodStreams({String? categoryId}) async {
     try {
       String url = '$_apiBase&action=get_vod_streams';
-      if (categoryId != null) url += '&category_id=$categoryId';
+      // '__all__' significa "todas", no agregar category_id al URL
+      if (categoryId != null && categoryId != '__all__') {
+        url += '&category_id=$categoryId';
+      }
+      print('🎬 VOD REQUEST [$categoryId]: $url');
       final response = await _dio.get(url);
       final List data = response.data;
-      return data.map((e) => VodStream.fromJson(e)).toList();
+      print(
+        '🎬 VOD RESPONSE [$categoryId]: ${data.length} items received from API',
+      );
+
+      if (data.isEmpty) {
+        print('🎬 VOD EMPTY [$categoryId]');
+        return [];
+      }
+
+      // Parsear y contar cuántos son válidos
+      final List<VodStream> streams = [];
+      int parseErrors = 0;
+      for (var item in data) {
+        try {
+          streams.add(VodStream.fromJson(item));
+        } catch (e) {
+          parseErrors++;
+        }
+      }
+
+      print(
+        '🎬 VOD PARSED [$categoryId]: ${streams.length} items (${parseErrors} errors)',
+      );
+      return streams;
     } catch (e) {
+      print('🎬 VOD ERROR: $e');
       return [];
     }
   }
@@ -90,10 +126,17 @@ class XtreamService {
   // Categorías Series
   Future<List<XtreamCategory>> getSeriesCategories() async {
     try {
-      final response = await _dio.get('$_apiBase&action=get_series_categories');
+      String url = '$_apiBase&action=get_series_categories';
+      print('📁 SERIES CATEGORIES REQUEST: $url');
+      final response = await _dio.get(url);
       final List data = response.data;
+      print('📁 SERIES CATEGORIES RESPONSE: ${data.length} categories');
+      for (var cat in data) {
+        print('   - ${cat['category_name']} (ID: ${cat['category_id']})');
+      }
       return data.map((e) => XtreamCategory.fromJson(e)).toList();
     } catch (e) {
+      print('📁 SERIES CATEGORIES ERROR: $e');
       return [];
     }
   }
@@ -102,11 +145,21 @@ class XtreamService {
   Future<List<Series>> getSeries({String? categoryId}) async {
     try {
       String url = '$_apiBase&action=get_series';
-      if (categoryId != null) url += '&category_id=$categoryId';
+      // '__all__' significa "todas", no agregar category_id al URL
+      if (categoryId != null && categoryId != '__all__') {
+        url += '&category_id=$categoryId';
+      }
+      print('📺 SERIES REQUEST: $url');
+      print('📺 SERIES categoryId: $categoryId');
       final response = await _dio.get(url);
       final List data = response.data;
+      print('📺 SERIES RESPONSE: ${data.length} items');
+      if (data.isEmpty) {
+        print('📺 SERIES EMPTY for categoryId: $categoryId');
+      }
       return data.map((e) => Series.fromJson(e)).toList();
     } catch (e) {
+      print('📺 SERIES ERROR: $e');
       return [];
     }
   }
