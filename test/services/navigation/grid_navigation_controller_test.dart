@@ -262,27 +262,15 @@ void main() {
     test(
       'navigateUp to incomplete row where current column exceeds row length',
       () {
+        // Test from a valid incomplete position
+        // Row 0: 5 items, Row 1: 4 items
+        // Starting at index 8 (Row 1, col 3 - last item)
         final controller = GridNavigationController(
-          itemCount: 8, // Row 0: 5, Row 1: 3 items
+          itemCount: 9,
           columnsPerRow: 5,
-          initialIndex:
-              9, // Would be row 1, col 4 if it existed (but itemCount=8)
+          initialIndex: 8,
         );
-
-        // Start at index 7 (row 1, col 2 - last item) instead
-        final controller2 = GridNavigationController(
-          itemCount: 13, // Row 0: 5, Row 1: 5, Row 2: 3
-          columnsPerRow: 5,
-          initialIndex: 14, // Would be row 2, col 4, but itemCount=13
-        );
-
-        // Actually test from a valid incomplete position
-        final controller3 = GridNavigationController(
-          itemCount: 9, // Row 0: 5, Row 1: 4
-          columnsPerRow: 5,
-          initialIndex: 8, // Row 1, col 3 (last item)
-        );
-        final result = controller3.navigateUp();
+        final result = controller.navigateUp();
 
         // Row 0 col 3 exists at index 3
         expect(result.success, isTrue);

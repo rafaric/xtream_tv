@@ -8,6 +8,7 @@ import '../models/channel.dart';
 import '../services/history_service.dart';
 import '../services/hidden_channels_service.dart';
 import '../services/category_settings_service.dart';
+import '../utils/logger.dart';
 
 // SharedPreferences provider
 final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
@@ -43,12 +44,12 @@ final vodStreamsProvider = FutureProvider.family<List<VodStream>, String>((
   ref,
   categoryId,
 ) async {
-  print('📦 PROVIDER: vodStreamsProvider called with categoryId: $categoryId');
+  logger.d('vodStreamsProvider called with categoryId: $categoryId');
   final result = await ref
       .read(xtreamServiceProvider)
       .getVodStreams(categoryId: categoryId);
-  print(
-    '📦 PROVIDER: vodStreamsProvider returning ${result.length} items for categoryId: $categoryId',
+  logger.d(
+    'vodStreamsProvider returning ${result.length} items for categoryId: $categoryId',
   );
   return result;
 });

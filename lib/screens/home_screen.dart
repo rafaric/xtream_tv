@@ -32,7 +32,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedContentIndex = 0;
   int _focusColumn = 1; // 0=nav, 1=categorías, 2=contenido
   XtreamChannel? _previewChannel;
-  EpgProgram? _previewProgram;
   Timer? _previewTimer;
   // Preview temporalmente deshabilitado
   // VlcPlayerController? _previewController;
@@ -1219,7 +1218,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
           if (result != null && result.success) {
             setState(() {
-              _selectedContentIndex = result!.newIndex;
+              _selectedContentIndex = result.newIndex;
             });
             _scrollContentToSelected();
           } else if (result != null && result.edge == NavigationEdge.left) {
@@ -1275,7 +1274,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
         if (result != null && result.success) {
           setState(() {
-            _selectedContentIndex = result!.newIndex;
+            _selectedContentIndex = result.newIndex;
           });
           _scrollContentToSelected();
         }
@@ -1982,10 +1981,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _previewTimer?.cancel();
     _previewTimer = Timer(const Duration(seconds: 2), () async {
       if (!mounted) return;
-      final program = _findEpgForChannel(channel.name, epgMap);
       setState(() {
         _previewChannel = channel;
-        _previewProgram = program;
       });
     });
   }
@@ -1995,7 +1992,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _previewTimer?.cancel();
     setState(() {
       _previewChannel = null;
-      _previewProgram = null;
     });
   }
 

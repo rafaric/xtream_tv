@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import '../models/channel.dart';
+import '../utils/logger.dart';
 
 class XtreamService {
   final Dio _dio = Dio();
@@ -68,16 +69,16 @@ class XtreamService {
   Future<List<XtreamCategory>> getVodCategories() async {
     try {
       String url = '$_apiBase&action=get_vod_categories';
-      print('📁 VOD CATEGORIES REQUEST: $url');
+      logger.d('VOD CATEGORIES REQUEST: $url');
       final response = await _dio.get(url);
       final List data = response.data;
-      print('📁 VOD CATEGORIES RESPONSE: ${data.length} categories');
+      logger.d('VOD CATEGORIES RESPONSE: ${data.length} categories');
       for (var cat in data) {
-        print('   - ${cat['category_name']} (ID: ${cat['category_id']})');
+        logger.d('   - ${cat['category_name']} (ID: ${cat['category_id']})');
       }
       return data.map((e) => XtreamCategory.fromJson(e)).toList();
     } catch (e) {
-      print('📁 VOD CATEGORIES ERROR: $e');
+      logger.e('VOD CATEGORIES ERROR: $e');
       return [];
     }
   }
@@ -90,15 +91,15 @@ class XtreamService {
       if (categoryId != null && categoryId != '__all__') {
         url += '&category_id=$categoryId';
       }
-      print('🎬 VOD REQUEST [$categoryId]: $url');
+      logger.d('VOD REQUEST [$categoryId]: $url');
       final response = await _dio.get(url);
       final List data = response.data;
-      print(
-        '🎬 VOD RESPONSE [$categoryId]: ${data.length} items received from API',
+      logger.d(
+        'VOD RESPONSE [$categoryId]: ${data.length} items received from API',
       );
 
       if (data.isEmpty) {
-        print('🎬 VOD EMPTY [$categoryId]');
+        logger.d('VOD EMPTY [$categoryId]');
         return [];
       }
 
@@ -113,12 +114,12 @@ class XtreamService {
         }
       }
 
-      print(
-        '🎬 VOD PARSED [$categoryId]: ${streams.length} items (${parseErrors} errors)',
+      logger.d(
+        'VOD PARSED [$categoryId]: ${streams.length} items ($parseErrors errors)',
       );
       return streams;
     } catch (e) {
-      print('🎬 VOD ERROR: $e');
+      logger.e('VOD ERROR: $e');
       return [];
     }
   }
@@ -127,16 +128,16 @@ class XtreamService {
   Future<List<XtreamCategory>> getSeriesCategories() async {
     try {
       String url = '$_apiBase&action=get_series_categories';
-      print('📁 SERIES CATEGORIES REQUEST: $url');
+      logger.d('SERIES CATEGORIES REQUEST: $url');
       final response = await _dio.get(url);
       final List data = response.data;
-      print('📁 SERIES CATEGORIES RESPONSE: ${data.length} categories');
+      logger.d('SERIES CATEGORIES RESPONSE: ${data.length} categories');
       for (var cat in data) {
-        print('   - ${cat['category_name']} (ID: ${cat['category_id']})');
+        logger.d('   - ${cat['category_name']} (ID: ${cat['category_id']})');
       }
       return data.map((e) => XtreamCategory.fromJson(e)).toList();
     } catch (e) {
-      print('📁 SERIES CATEGORIES ERROR: $e');
+      logger.e('SERIES CATEGORIES ERROR: $e');
       return [];
     }
   }
@@ -149,17 +150,17 @@ class XtreamService {
       if (categoryId != null && categoryId != '__all__') {
         url += '&category_id=$categoryId';
       }
-      print('📺 SERIES REQUEST: $url');
-      print('📺 SERIES categoryId: $categoryId');
+      logger.d('SERIES REQUEST: $url');
+      logger.d('SERIES categoryId: $categoryId');
       final response = await _dio.get(url);
       final List data = response.data;
-      print('📺 SERIES RESPONSE: ${data.length} items');
+      logger.d('SERIES RESPONSE: ${data.length} items');
       if (data.isEmpty) {
-        print('📺 SERIES EMPTY for categoryId: $categoryId');
+        logger.d('SERIES EMPTY for categoryId: $categoryId');
       }
       return data.map((e) => Series.fromJson(e)).toList();
     } catch (e) {
-      print('📺 SERIES ERROR: $e');
+      logger.e('SERIES ERROR: $e');
       return [];
     }
   }

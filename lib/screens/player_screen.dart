@@ -626,7 +626,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   width: 48,
                   height: 48,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) =>
+                  errorBuilder: (context, error, stackTrace) =>
                       const Icon(Icons.tv, color: Colors.white54, size: 40),
                 ),
               ),
