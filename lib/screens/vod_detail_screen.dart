@@ -21,8 +21,14 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _requestFocus();
+  }
+
+  void _requestFocus() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _keyboardFocusNode.requestFocus();
+      if (mounted) {
+        _keyboardFocusNode.requestFocus();
+      }
     });
   }
 
@@ -44,10 +50,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
         onKeyEvent: (event) {
           if (event is! KeyDownEvent) return;
 
-          if (event.logicalKey == LogicalKeyboardKey.goBack ||
-              event.logicalKey == LogicalKeyboardKey.escape) {
-            Navigator.of(context).pop();
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
             setState(() {
               if (_focusedButtonIndex > 0) _focusedButtonIndex--;
             });
@@ -197,12 +200,12 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
                           // Botón reproducir
                           _buildPlayButton(
                             isFocused: _focusedButtonIndex == 1,
-                            onPressed: () {
+                            onPressed: () async {
                               final url = service.getVodUrl(
                                 vod.streamId,
                                 vod.containerExtension,
                               );
-                              Navigator.of(context).push(
+                              await Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (_) => PlayerScreen(
                                     channel: XtreamChannel(
@@ -216,6 +219,8 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
                                   ),
                                 ),
                               );
+                              // Re-pedir foco cuando vuelve del player
+                              _requestFocus();
                             },
                           ),
                         ],
@@ -280,7 +285,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
     );
   }
 
-  void _handleSelect() {
+  void _handleSelect() async {
     if (_focusedButtonIndex == 0) {
       // Volver
       Navigator.of(context).pop();
@@ -289,7 +294,7 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
       final service = ref.read(xtreamServiceProvider);
       final vod = widget.vod;
       final url = service.getVodUrl(vod.streamId, vod.containerExtension);
-      Navigator.of(context).push(
+      await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => PlayerScreen(
             channel: XtreamChannel(
@@ -303,6 +308,8 @@ class _VodDetailScreenState extends ConsumerState<VodDetailScreen> {
           ),
         ),
       );
+      // Re-pedir foco cuando vuelve del player
+      _requestFocus();
     }
   }
 

@@ -17,6 +17,7 @@ class SeriesDetailScreen extends ConsumerStatefulWidget {
 class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
   final ScrollController _episodesScrollController = ScrollController();
   final Map<int, GlobalKey> _episodeKeys = {};
+  final FocusNode _keyboardFocusNode = FocusNode();
 
   String _selectedSeason = '';
   int _seasonFocusIndex = 0;
@@ -24,6 +25,27 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
 
   // 0=Volver, 1=Temporadas, 2=Episodios
   int _focusColumn = 1; // Default focus en las temporadas
+
+  @override
+  void initState() {
+    super.initState();
+    _requestFocus();
+  }
+
+  void _requestFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _keyboardFocusNode.requestFocus();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _keyboardFocusNode.dispose();
+    _episodesScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,15 +56,9 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
       body: KeyboardListener(
-        focusNode: FocusNode()..requestFocus(),
+        focusNode: _keyboardFocusNode,
         onKeyEvent: (event) {
           if (event is! KeyDownEvent) return;
-
-          if (event.logicalKey == LogicalKeyboardKey.goBack ||
-              event.logicalKey == LogicalKeyboardKey.escape) {
-            Navigator.of(context).pop();
-            return;
-          }
 
           if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
             setState(() {
@@ -483,13 +499,13 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
     });
   }
 
-  void _playEpisode(SeriesEpisode episode) {
+  Future<void> _playEpisode(SeriesEpisode episode) async {
     final service = ref.read(xtreamServiceProvider);
     final url = episode.directSource.isNotEmpty
         ? episode.directSource
         : service.getEpisodeUrl(episode.id, episode.containerExtension);
 
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           channel: XtreamChannel(
@@ -504,6 +520,9 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
         ),
       ),
     );
+
+    // Re-request focus after returning from player to ensure back button works
+    _requestFocus();
   }
 
   Widget _buildPlaceholder() {

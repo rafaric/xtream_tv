@@ -226,16 +226,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _goBack() {
     if (_isDisposed) return;
     _isDisposed = true;
-    // Remover handler ANTES del pop para evitar propagación
+    // Solo cleanup, el pop lo maneja el sistema
     HardwareKeyboard.instance.removeHandler(_onKey);
     _longPressTimer?.cancel();
     _controller?.dispose();
-    // Usar Future.microtask para asegurar que el pop ocurra después de consumir el evento
-    Future.microtask(() {
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
-    });
   }
 
   bool _onKey(KeyEvent event) {
@@ -338,6 +332,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     } else if (event.logicalKey == LogicalKeyboardKey.goBack ||
         event.logicalKey == LogicalKeyboardKey.escape) {
       _goBack();
+      return false; // No consumir el evento, dejar que se propague
     } else if (event.logicalKey == LogicalKeyboardKey.space) {
       _toggleOverlay();
     } else {
