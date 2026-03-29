@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:better_player_plus/better_player_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/channel.dart';
 import '../providers/xtream_provider.dart';
 import '../widgets/channel_history_overlay.dart';
@@ -58,6 +59,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     debugPrint('🎬 PlayerScreen initState');
     debugPrint('🔗 Stream URL: $_currentStreamUrl');
+
+    // Enable wakelock to prevent screensaver during playback
+    WakelockPlus.enable();
 
     _initializePlayer();
 
@@ -849,6 +853,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _longPressTimer?.cancel();
     _controller?.dispose();
     _epgChannelScrollController.dispose();
+    // Disable wakelock when leaving player
+    WakelockPlus.disable();
     super.dispose();
   }
 }

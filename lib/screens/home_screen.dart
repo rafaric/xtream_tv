@@ -1733,95 +1733,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  //ignore: unused_element
-  Widget _buildGroupCard(
-    CustomGroup group,
-    List<XtreamChannel> channels,
-    int index,
-  ) {
-    final isSelected = _focusColumn == 2 && index == _selectedContentIndex;
-    final hasChannels = channels.isNotEmpty;
-
-    return GestureDetector(
-      onTap: () => _openGroupsScreen(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.deepPurple : const Color(0xFF1A1A2E),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSelected
-                ? Colors.deepPurpleAccent
-                : Colors.deepPurple.withValues(alpha: 0.2),
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.deepPurple.withValues(alpha: 0.4),
-                    blurRadius: 8,
-                  ),
-                ]
-              : [],
-        ),
-        child: Stack(
-          children: [
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Color(group.colorValue).withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.folder,
-                    color: Color(group.colorValue),
-                    size: 32,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-                  child: Text(
-                    group.name,
-                    style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.white70,
-                      fontSize: 12,
-                      fontWeight: isSelected
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                    maxLines: 2,
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Text(
-                  '${channels.length} canales',
-                  style: TextStyle(
-                    color: isSelected ? Colors.white60 : Colors.white38,
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: Icon(
-                hasChannels ? Icons.check_circle : Icons.circle_outlined,
-                color: hasChannels ? Colors.green : Colors.white24,
-                size: 16,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _openGroupsScreen() {
     Navigator.of(
       context,
@@ -1984,14 +1895,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       setState(() {
         _previewChannel = channel;
       });
-    });
-  }
-
-  // ignore: unused_element
-  void _clearPreview() {
-    _previewTimer?.cancel();
-    setState(() {
-      _previewChannel = null;
     });
   }
 

@@ -57,6 +57,9 @@ dependencies:
   # Para logs en pantalla
   logger: ^2.4.0
 
+  # Prevenir screensaver durante reproducción
+  wakelock_plus: ^1.2.8
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
